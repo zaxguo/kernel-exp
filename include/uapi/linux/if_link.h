@@ -724,4 +724,17 @@ enum {
 
 #define IFLA_HSR_MAX (__IFLA_HSR_MAX - 1)
 
+/* PRP section */
+
+enum {
+	IFLA_PRP_UNSPEC,
+	IFLA_PRP_SLAVE1,
+	IFLA_PRP_SLAVE2,
+	IFLA_PRP_MULTICAST_SPEC,	/* Last byte of supervision addr */
+	IFLA_PRP_SUPERVISION_ADDR,	/* Supervision frame multicast addr */
+	IFLA_PRP_SEQ_NR,
+	__IFLA_PRP_MAX,
+};
+
+#define IFLA_PRP_MAX (__IFLA_PRP_MAX - 1)
 #endif /* _UAPI_LINUX_IF_LINK_H */
