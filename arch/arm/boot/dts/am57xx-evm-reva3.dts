@@ -12,6 +12,20 @@
 
 / {
 	model = "TI AM572x EVM Rev A3";
+
+	reserved-memory {
+		jailhouse: jailhouse@ef000000 {
+			reg = <0x0 0xef000000 0x0 0x1000000>;
+			no-map;
+			status = "okay";
+		};
+
+		jh_inmate: jh_inmate@ee000000 {
+			reg = <0x0 0xee000000 0x0 0x1000000>;
+			no-map;
+			status = "okay";
+		};
+	};
 };
 
 &dra7_pmx_core {
