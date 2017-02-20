@@ -28,6 +28,21 @@
 	};
 };
 
+&timer8 {
+	status = "disabled";
+	ti,no-idle;
+};
+
+&timer7 {
+	status = "disabled";
+	ti,no-idle;
+};
+
+&uart9 {
+	status = "disabled";
+	ti,no-idle;
+};
+
 &dra7_pmx_core {
 
 	/*
