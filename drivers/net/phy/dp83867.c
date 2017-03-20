@@ -31,6 +31,7 @@
 #define DP83867_CTRL		0x1f
 
 /* Extended Registers */
+#define DP83867_CFG4		0x0031
 #define DP83867_RGMIICTL	0x0032
 #define DP83867_RGMIIDCTL	0x0086
 #define DP83867_IO_MUX_CFG	0x0170
@@ -74,6 +75,7 @@ struct dp83867_private {
 	int tx_id_delay;
 	int fifo_depth;
 	int io_impedance;
+	int strap_mode;
 };
 
 static int dp83867_ack_interrupt(struct phy_device *phydev)
@@ -123,12 +125,18 @@ static int dp83867_of_init(struct phy_device *phydev)
 		return -ENODEV;
 
 	dp83867->io_impedance = -EINVAL;
+	dp83867->strap_mode = -EINVAL;
 
 	/* Optional configuration */
 	if (of_property_read_bool(of_node, "ti,max-output-impedance"))
 		dp83867->io_impedance = DP83867_IO_MUX_CFG_IO_IMPEDANCE_MAX;
 	else if (of_property_read_bool(of_node, "ti,min-output-impedance"))
 		dp83867->io_impedance = DP83867_IO_MUX_CFG_IO_IMPEDANCE_MIN;
+
+	if (!of_property_read_u32(of_node, "ti,strap-mode",
+				  &dp83867->strap_mode))
+		if (dp83867->strap_mode != DP83867_4LEVEL_STRAP_MODE1)
+			return -EINVAL;
 
 	ret = of_property_read_u32(of_node, "ti,rx-internal-delay",
 				   &dp83867->rx_id_delay);
@@ -172,6 +180,15 @@ static int dp83867_config_init(struct phy_device *phydev)
 			return ret;
 	} else {
 		dp83867 = (struct dp83867_private *)phydev->priv;
+	}
+
+	if ((dp83867->strap_mode == DP83867_4LEVEL_STRAP_MODE1) ||
+	    (dp83867->strap_mode == DP83867_4LEVEL_STRAP_MODE2)) {
+		val = phy_read_mmd_indirect(phydev, DP83867_CFG4,
+					    DP83867_DEVADDR, phydev->addr);
+		val &= ~BIT(7);
+		phy_write_mmd_indirect(phydev, DP83867_CFG4,
+				       DP83867_DEVADDR, phydev->addr, val);
 	}
 
 	if (phy_interface_is_rgmii(phydev)) {
