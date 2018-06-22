@@ -379,6 +379,8 @@ u8 sdio_readb(struct sdio_func *func, unsigned int addr, int *err_ret)
 		return 0xFF;
 	}
 
+	printk("lwg:%s:entered\n", __func__);
+
 	return val;
 }
 EXPORT_SYMBOL_GPL(sdio_readb);

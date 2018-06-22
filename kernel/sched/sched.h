@@ -17,6 +17,14 @@
 struct rq;
 struct cpuidle_state;
 
+// lwg:PSB DEBUGGING
+#define PSB_DEBUG
+
+enum {
+	PSB_OUT = 0, //
+	PSB_IN	 = 1, // PSB_IN only allows for idle or PSB process
+};
+
 /* task_struct::on_rq states: */
 #define TASK_ON_RQ_QUEUED	1
 #define TASK_ON_RQ_MIGRATING	2
@@ -347,7 +355,8 @@ struct cfs_bandwidth { };
 struct cfs_rq {
 	struct load_weight load;
 	unsigned int nr_running, h_nr_running;
-
+	// lwg: PSB se, initialized in init_cfs_rq
+	struct sched_entity psb_se;
 	u64 exec_clock;
 	u64 min_vruntime;
 #ifndef CONFIG_64BIT
@@ -559,7 +568,8 @@ extern struct root_domain def_root_domain;
 struct rq {
 	/* runqueue lock: */
 	raw_spinlock_t lock;
-
+	unsigned int in_psb;
+	u64 psb_loan;
 	/*
 	 * nr_running and cpu_load should be in the same cacheline because
 	 * remote CPUs use both these fields when doing load calculation.
@@ -1166,6 +1176,7 @@ static const u32 prio_to_wmult[40] = {
 
 #define DEQUEUE_SLEEP		0x01
 #define DEQUEUE_SAVE		0x02
+#define DEQUEUE_PSB			0x04
 
 #define RETRY_TASK		((void *)-1UL)
 

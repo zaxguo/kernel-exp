@@ -14,6 +14,8 @@
 #include <linux/wait.h>
 #include <linux/atomic.h>
 
+
+
 #ifdef CONFIG_BLOCK
 
 enum bh_state_bits {
@@ -294,6 +296,19 @@ static inline void bforget(struct buffer_head *bh)
 static inline struct buffer_head *
 sb_bread(struct super_block *sb, sector_t block)
 {
+//	DUMP_STACK_LWG();
+#if 0
+	if (!strcmp(current->comm, TEST_COMM)) {
+		dump_stack();
+	}
+	if ((unsigned long)block == 0x107) {
+		dump_stack();
+	}
+#endif
+	if (!strcmp(sb->s_type->name, "ext2")) {
+		printk("lwg:%s:%s:reading [%08lx]\n", __func__, sb->s_id, (unsigned long)block);
+	}
+	/* lwg:used for syncing metadata */
 	return __bread_gfp(sb->s_bdev, block, sb->s_blocksize, __GFP_MOVABLE);
 }
 

@@ -73,6 +73,8 @@ enum ipi_msg_type {
 	IPI_CPU_STOP,
 	IPI_IRQ_WORK,
 	IPI_COMPLETION,
+	IPI_PSB_START,
+	IPI_PSB_END,
 	IPI_CPU_BACKTRACE = 15,
 };
 
@@ -478,6 +480,8 @@ static const char *ipi_types[NR_IPI] __tracepoint_string = {
 	S(IPI_CALL_FUNC_SINGLE, "Single function call interrupts"),
 	S(IPI_CPU_STOP, "CPU stop interrupts"),
 	S(IPI_IRQ_WORK, "IRQ work interrupts"),
+	S(IPI_PSB_START, "PSB start interrupts"),
+	S(IPI_PSB_END, "PSB end interrupts"),
 	S(IPI_COMPLETION, "completion interrupts"),
 };
 
@@ -645,7 +649,13 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 		ipi_complete(cpu);
 		irq_exit();
 		break;
-
+	// lwg:issue when entering PSB
+	case IPI_PSB_START:
+		scheduler_ipi_psb(1);
+		break;
+	case IPI_PSB_END:
+		scheduler_ipi_psb(0);
+		break;
 	case IPI_CPU_BACKTRACE:
 		irq_enter();
 		nmi_cpu_backtrace(regs);
@@ -663,9 +673,25 @@ void handle_IPI(int ipinr, struct pt_regs *regs)
 	set_irq_regs(old_regs);
 }
 
+extern int psb_pid;
 void smp_send_reschedule(int cpu)
 {
+#if 0
+	if (psb_pid != -1) {
+		dump_stack();
+	}
+#endif
 	smp_cross_call(cpumask_of(cpu), IPI_RESCHEDULE);
+}
+
+void smp_send_reschedule_psb_start(int cpu)
+{
+	smp_cross_call(cpumask_of(cpu), IPI_PSB_START);
+}
+
+void smp_send_reschedule_psb_end(int cpu)
+{
+	smp_cross_call(cpumask_of(cpu), IPI_PSB_END);
 }
 
 void smp_send_stop(void)

@@ -198,6 +198,9 @@ static struct page * ext2_get_page(struct inode *dir, unsigned long n,
 				   int quiet)
 {
 	struct address_space *mapping = dir->i_mapping;
+	/* lwg: at last it will put the mapped page into page cache
+	 * calls ext2_readpage, which calls mpage_readpage to further read from blk dev
+	 * into memory page */
 	struct page *page = read_mapping_page(mapping, n, NULL);
 	if (!IS_ERR(page)) {
 		kmap(page);
@@ -358,13 +361,24 @@ ext2_readdir(struct file *file, struct dir_context *ctx)
  * and the entry itself. Page is returned mapped and unlocked.
  * Entry is guaranteed to be valid.
  */
+
+/* lwg: find the page from blkdev
+ * ext2_get_page is used pull data out from blk
+ * the blknr are mapped by ext2_get_block. The mapping is saved
+ * in buffer_head, which is later embedded into page and put into page cache */
 struct ext2_dir_entry_2 *ext2_find_entry (struct inode * dir,
 			struct qstr *child, struct page ** res_page)
 {
+	/* lwg:XXX: debugging ext2 FS */
+//	dump_stack();
+	if (!strcmp(current->comm, TEST_COMM)) {
+		printk("lwg:%s:finding ino for %s\n", __func__, child->name);
+	}
 	const char *name = child->name;
 	int namelen = child->len;
 	unsigned reclen = EXT2_DIR_REC_LEN(namelen);
 	unsigned long start, n;
+	/* lwg: calculate how many pages they take */
 	unsigned long npages = dir_pages(dir);
 	struct page *page = NULL;
 	struct ext2_inode_info *ei = EXT2_I(dir);
@@ -383,6 +397,9 @@ struct ext2_dir_entry_2 *ext2_find_entry (struct inode * dir,
 	n = start;
 	do {
 		char *kaddr;
+		/* lwg: this is called to submit bio to map the content into pages
+		 * interesting, get the page, then typecast to pointer, cmp memory byte
+		 * by byte. */
 		page = ext2_get_page(dir, n, dir_has_error);
 		if (!IS_ERR(page)) {
 			kaddr = page_address(page);
@@ -395,6 +412,7 @@ struct ext2_dir_entry_2 *ext2_find_entry (struct inode * dir,
 					ext2_put_page(page);
 					goto out;
 				}
+				/* use !memcmp so that a success is 1*/
 				if (ext2_match (namelen, name, de))
 					goto found;
 				de = ext2_next_entry(de);
@@ -435,12 +453,14 @@ struct ext2_dir_entry_2 * ext2_dotdot (struct inode *dir, struct page **p)
 	return de;
 }
 
+/* lwg: take the name and the reference of the directory, map the
+* result into pages */
 ino_t ext2_inode_by_name(struct inode *dir, struct qstr *child)
 {
 	ino_t res = 0;
 	struct ext2_dir_entry_2 *de;
+	/* lwg: pass the addr of a pointer*/
 	struct page *page;
-	
 	de = ext2_find_entry (dir, child, &page);
 	if (de) {
 		res = le32_to_cpu(de->inode);

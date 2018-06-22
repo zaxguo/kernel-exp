@@ -692,6 +692,8 @@ static int do_dentry_open(struct file *f,
 
 	path_get(&f->f_path);
 	f->f_inode = inode;
+	/* lwg: the i_mapping field of inode always points to address_space object of the owner
+	 * of the pages containing the inode's data */
 	f->f_mapping = inode->i_mapping;
 
 	if (unlikely(f->f_flags & O_PATH)) {
@@ -730,10 +732,17 @@ static int do_dentry_open(struct file *f,
 	if (error)
 		goto cleanup_all;
 
-	if (!open)
+	if (!open) {
 		open = f->f_op->open;
+		if (!strcmp(current->comm, TEST_COMM)) {
+			printk("lwg:%s:executing %pf\n", __func__, f->f_op->open);
+		}
+	}
 	if (open) {
 		error = open(inode, f);
+			if (!strcmp(current->comm, TEST_COMM)) {
+				printk("lwg:%s:executing %pf for ino %lu\n", __func__, f->f_op->open, inode->i_ino);
+		}
 		if (error)
 			goto cleanup_all;
 	}
@@ -840,12 +849,15 @@ EXPORT_SYMBOL(file_path);
 int vfs_open(const struct path *path, struct file *file,
 	     const struct cred *cred)
 {
+	/* lwg: normally just return d_inode(dentry) */
 	struct inode *inode = vfs_select_inode(path->dentry, file->f_flags);
 
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
 
 	file->f_path = *path;
+	DUMP_CONTENT_LWG(path->dentry->d_iname);
+//	DUMP_STACK_LWG();
 	return do_dentry_open(file, inode, NULL, cred);
 }
 
@@ -1004,17 +1016,20 @@ EXPORT_SYMBOL(file_open_root);
 long do_sys_open(int dfd, const char __user *filename, int flags, umode_t mode)
 {
 	struct open_flags op;
+	/* lwg: check and set the flags needed by later operations...
+	 * 0 on success */
 	int fd = build_open_flags(flags, mode, &op);
 	struct filename *tmp;
 
 	if (fd)
 		return fd;
-
+	/* lwg: alloc bunch of memory cache for filename struct */
 	tmp = getname(filename);
 	if (IS_ERR(tmp))
 		return PTR_ERR(tmp);
-
+	/* lwg: will pass current->files to create a fdtable */
 	fd = get_unused_fd_flags(flags);
+	/* lwg: now the fdt has been created, do the real stuff */
 	if (fd >= 0) {
 		struct file *f = do_filp_open(dfd, tmp, &op);
 		if (IS_ERR(f)) {

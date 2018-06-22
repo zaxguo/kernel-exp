@@ -240,6 +240,9 @@ struct omap_hsmmc_adma_desc {
 #define ST_STOP			0x1
 #define ST_TFR			0x3
 
+struct mmc_host *lwg_mmc;
+EXPORT_SYMBOL(lwg_mmc);
+
 struct omap_hsmmc_next {
 	unsigned int	dma_len;
 	s32		cookie;
@@ -1023,6 +1026,10 @@ omap_hsmmc_start_command(struct omap_hsmmc_host *host, struct mmc_command *cmd,
 
 	dev_vdbg(mmc_dev(host->mmc), "%s: CMD%d, argument 0x%08x\n",
 		mmc_hostname(host->mmc), cmd->opcode, cmd->arg);
+#if 0
+	printk("lwg:%s:%s: CMD%d, argument 0x%08x\n",
+		__func__, mmc_hostname(host->mmc), cmd->opcode, cmd->arg);
+#endif
 	host->cmd = cmd;
 
 	omap_hsmmc_enable_irq(host, cmd);
@@ -1553,9 +1560,15 @@ static int omap_hsmmc_pre_dma_transfer(struct omap_hsmmc_host *host,
 		dev = mmc_dev(host->mmc);
 
 	/* Check if next job is already prepared */
+	/* lwg: this is used to maximize throughput so that two jobs can
+	 * be combined. Smart move. */
 	if (next || data->host_cookie != host->next_data.cookie) {
 		dma_len = dma_map_sg(dev, data->sg, data->sg_len,
 				     omap_hsmmc_get_dma_dir(host, data));
+//		void *content = sg_virt(data->sg);
+//		print_hex_dump_bytes("lwg:%s:mapping %p to DMA, content dump %s\n", __func__, content, (char *)content);
+//		if (host->mrq->cmd->opcode == MMC_WRITE_BLOCK)
+//			print_hex_dump_bytes("lwg:content dump:", DUMP_PREFIX_ADDRESS, content, 4);
 
 	} else {
 		dma_len = host->next_data.dma_len;
@@ -1718,6 +1731,7 @@ out:
 	OMAP_HSMMC_WRITE(host->base, SYSCTL, reg);
 }
 
+/* XXX: used in AM57x eMMC */
 static void omap_hsmmc_start_dma_transfer(struct omap_hsmmc_host *host)
 {
 	struct mmc_request *req = host->mrq;
@@ -1786,9 +1800,8 @@ static int omap_hsmmc_setup_adma_transfer(struct omap_hsmmc_host *host,
 /*
  * Configure block length for MMC/SD cards and initiate the transfer.
  */
-static int
-omap_hsmmc_prepare_data(struct omap_hsmmc_host *host, struct mmc_request *req)
-{
+/* lwg: where is the data stored?? */
+static int omap_hsmmc_prepare_data(struct omap_hsmmc_host *host, struct mmc_request *req) {
 	int ret;
 	unsigned long long timeout;
 
@@ -1810,8 +1823,10 @@ omap_hsmmc_prepare_data(struct omap_hsmmc_host *host, struct mmc_request *req)
 		}
 		return 0;
 	}
-
+//	printk("lwg:%s:setup transfer for %u bytes, %u blocks\n", __func__, req->data->sg_count, req->data->blocks);
+	/* lwg: omap uses adma */
 	if (host->use_adma) {
+//		printk("lwg:%s:use adma\n", __func__);
 		ret = omap_hsmmc_setup_adma_transfer(host, req);
 		if (ret != 0) {
 			dev_err(mmc_dev(host->mmc), "MMC adma setup failed\n");
@@ -1903,6 +1918,7 @@ static void omap_hsmmc_request(struct mmc_host *mmc, struct mmc_request *req)
 	WARN_ON(host->mrq != NULL);
 	host->mrq = req;
 	host->clk_rate = clk_get_rate(host->fclk);
+	/* lwg: this will setup the addr to DMA in scatterlist */
 	err = omap_hsmmc_prepare_data(host, req);
 	if (err) {
 		req->cmd->error = err;
@@ -1918,6 +1934,15 @@ static void omap_hsmmc_request(struct mmc_host *mmc, struct mmc_request *req)
 		omap_hsmmc_start_command(host, req->sbc, NULL);
 		return;
 	}
+
+	/* lwg: this just kick starts the engine */
+#if 0
+		void *content = sg_virt(req->data->sg);
+//		print_hex_dump_bytes("lwg:%s:mapping %p to DMA, content dump %s\n", __func__, content, (char *)content);
+		if (mmc->card->type == 0 && host->mrq->cmd->opcode == MMC_WRITE_BLOCK)
+			print_hex_dump_bytes("lwg:content dump:", DUMP_PREFIX_ADDRESS, content, 4);
+#endif
+
 
 	omap_hsmmc_start_dma_transfer(host);
 	omap_hsmmc_start_command(host, req->cmd, req->data);
@@ -2443,6 +2468,7 @@ tuning_error:
 	return ret;
 }
 
+/* lwg: used to physically send request on bus */
 static struct mmc_host_ops omap_hsmmc_ops = {
 	.post_req = omap_hsmmc_post_req,
 	.pre_req = omap_hsmmc_pre_req,
@@ -2753,6 +2779,7 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 	const struct omap_mmc_of_data *data;
 	void __iomem *base;
 
+
 	match = of_match_device(of_match_ptr(omap_mmc_of_match), &pdev->dev);
 	if (match) {
 		pdata = of_get_hsmmc_pdata(&pdev->dev);
@@ -2805,6 +2832,9 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 	host->pbias_enabled = 0;
 	host->vqmmc_enabled = 0;
 	host->use_adma	= false;
+
+	printk("lwg:%s:%d:mmc_host = %p\n", __func__, __LINE__, (void *)mmc);
+	lwg_mmc = mmc;
 
 	ret = omap_hsmmc_gpio_init(mmc, host, pdata);
 	if (ret)
@@ -2974,6 +3004,7 @@ err1:
 err_gpio:
 	mmc_free_host(mmc);
 err:
+	printk("lwg:%s:%d:err -- %p\n", __func__, __LINE__, (void *)mmc);
 	return ret;
 }
 

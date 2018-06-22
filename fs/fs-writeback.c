@@ -1266,7 +1266,7 @@ __writeback_single_inode(struct inode *inode, struct writeback_control *wbc)
 	WARN_ON(!(inode->i_state & I_SYNC));
 
 	trace_writeback_single_inode_start(inode, wbc, nr_to_write);
-
+//	printk("lwg:%s:start for %lu\n", __func__, inode->i_ino);
 	ret = do_writepages(mapping, wbc);
 
 	/*

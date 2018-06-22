@@ -2065,6 +2065,7 @@ blk_qc_t generic_make_request(struct bio *bio)
 		if (likely(blk_queue_enter(q, __GFP_DIRECT_RECLAIM) == 0)) {
 
 			ret = q->make_request_fn(q, bio);
+//			printk("lwg:%s:%d:fn = %pf\n", __func__, __LINE__, q->make_request_fn);
 
 			blk_queue_exit(q);
 
@@ -2095,14 +2096,26 @@ EXPORT_SYMBOL(generic_make_request);
  */
 blk_qc_t submit_bio(int rw, struct bio *bio)
 {
+	/* lwg: bio_sectors() indicates # of sectors */
+//	printk("lwg:%s:%d:%08lx\n", __func__, rw, (unsigned long)bio->bi_iter.bi_sector);
 	bio->bi_rw |= rw;
 
 	/*
 	 * If it's a regular read/write or a barrier with data attached,
 	 * go through the normal accounting stuff before submission.
 	 */
+
+
 	if (bio_has_data(bio)) {
 		unsigned int count;
+
+	#if 1
+		if (bio->bi_bdev->bd_super) {
+			if (!strcmp(bio->bi_bdev->bd_super->s_id, "bdev")) {
+				dump_stack();
+			}
+		}
+	#endif
 
 		if (unlikely(rw & REQ_WRITE_SAME))
 			count = bdev_logical_block_size(bio->bi_bdev) >> 9;
@@ -2126,7 +2139,8 @@ blk_qc_t submit_bio(int rw, struct bio *bio)
 				count);
 		}
 	}
-
+	unsigned long block = (unsigned long)bio->bi_iter.bi_sector;
+	trace_printk("lwg:%s:%d:%s:%08lx\n", __func__, rw, bio->bi_bdev->bd_super->s_id, block);
 	return generic_make_request(bio);
 }
 EXPORT_SYMBOL(submit_bio);

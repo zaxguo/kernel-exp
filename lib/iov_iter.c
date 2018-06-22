@@ -429,6 +429,7 @@ EXPORT_SYMBOL(copy_from_iter_nocache);
 size_t copy_page_to_iter(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i)
 {
+
 	if (i->type & (ITER_BVEC|ITER_KVEC)) {
 		void *kaddr = kmap_atomic(page);
 		size_t wanted = copy_to_iter(kaddr + offset, bytes, i);
@@ -473,7 +474,22 @@ EXPORT_SYMBOL(iov_iter_zero);
 size_t iov_iter_copy_from_user_atomic(struct page *page,
 		struct iov_iter *i, unsigned long offset, size_t bytes)
 {
+#if 0
+	/* lwg: the page is mapped here */
+	if (!strcmp(page->mapping->host->i_sb->s_id, "loop0")) {
+		int isHighmem = 0;
+		isHighmem = PageHighMem(page);
+		page->private = 0xdeadbeef;
+		printk("lwg:%s:%d:page [%p] highmem : %d\n", __func__, __LINE__, (void *)page, isHighmem);
+	}
+#endif
+
 	char *kaddr = kmap_atomic(page), *p = kaddr + offset;
+
+	if (page->flags & 0x10000000) {
+		printk("lwg:%s:%d:writing va@[%p], pa@[%08lx], page struct@[%p]\n", __func__, __LINE__, (void *)kaddr, virt_to_phys((void *)kaddr), (void *)page);
+	}
+	/* lwg: write three times... weird */
 	iterate_all_kinds(i, bytes, v,
 		__copy_from_user_inatomic((p += v.iov_len) - v.iov_len,
 					  v.iov_base, v.iov_len),

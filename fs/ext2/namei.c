@@ -58,11 +58,16 @@ static struct dentry *ext2_lookup(struct inode * dir, struct dentry *dentry, uns
 {
 	struct inode * inode;
 	ino_t ino;
-	
+
 	if (dentry->d_name.len > EXT2_NAME_LEN)
 		return ERR_PTR(-ENAMETOOLONG);
-
+	/* lwg: find the ino based on  inode* and qstr of the directory
+	 * works as follows: 1) read in the page, 2) ext2_match to compare name, return # on success
+	 * Q: why not use dentry->d_inode ?
+	 * A: by the inode * itself it's sufficient to find an ext2_dir_entry2 by ext2_get_page
+	 * the dentry just passed a name to match that found entry */
 	ino = ext2_inode_by_name(dir, &dentry->d_name);
+//	printk("lwg:%s:%s in %lu has ino %lu\n", __func__, dentry->d_iname, dir->i_ino, (unsigned long)ino);
 	inode = NULL;
 	if (ino) {
 		inode = ext2_iget(dir->i_sb, ino);

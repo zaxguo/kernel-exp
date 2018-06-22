@@ -791,7 +791,7 @@ ssize_t simple_attr_read(struct file *file, char __user *buf,
 	struct simple_attr *attr;
 	size_t size;
 	ssize_t ret;
-
+//	DUMP_STACK_LWG();
 	attr = file->private_data;
 
 	if (!attr->get)
@@ -930,6 +930,7 @@ EXPORT_SYMBOL_GPL(generic_fh_to_parent);
  * filesystems which track all non-inode metadata in the buffers list
  * hanging off the address_space structure.
  */
+/* lwg: file-wise sync goes here */
 int __generic_file_fsync(struct file *file, loff_t start, loff_t end,
 				 int datasync)
 {
@@ -942,6 +943,13 @@ int __generic_file_fsync(struct file *file, loff_t start, loff_t end,
 		return err;
 
 	mutex_lock(&inode->i_mutex);
+	/* lwg: all sync goes through here */
+#if 0
+	DUMP_STACK_LWG();
+	if (!strcmp(file->f_path.dentry->d_inode, "test_buffer.txt")) {
+		dump_stack();
+	}
+#endif
 	ret = sync_mapping_buffers(inode->i_mapping);
 	if (!(inode->i_state & I_DIRTY_ALL))
 		goto out;
@@ -971,9 +979,13 @@ EXPORT_SYMBOL(__generic_file_fsync);
 int generic_file_fsync(struct file *file, loff_t start, loff_t end,
 		       int datasync)
 {
+//	DUMP_STACK_LWG();
 	struct inode *inode = file->f_mapping->host;
 	int err;
-
+//    DUMP_CONTENT_LWG(file->f_path.dentry->d_iname);
+	if (datasync == 1) {
+		printk("lwg:%s:only sync essential metadata for %lu\n", __func__, inode->i_ino);
+	}
 	err = __generic_file_fsync(file, start, end, datasync);
 	if (err)
 		return err;

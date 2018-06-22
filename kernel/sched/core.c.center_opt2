@@ -1,5 +1,4 @@
 /*
-
  *  kernel/sched/core.c
  *
  *  Kernel scheduler and related syscalls
@@ -103,10 +102,6 @@ inline bool rq_in_psb(struct rq *rq)
 {
 	return (rq->curr->flags & PF_PSB) || (is_idle_task(rq->curr)) ;
 }
-void on_gpio(void);
-void off_gpio(void);
-
-
 
 static void update_rq_clock_task(struct rq *rq, s64 delta);
 
@@ -2562,13 +2557,10 @@ void wake_up_new_task(struct task_struct *p)
 	set_task_cpu(p, select_task_rq(p, task_cpu(p), SD_BALANCE_FORK, 0));
 #endif
 
-
-
 	rq = __task_rq_lock(p);
 	activate_task(rq, p, 0);
 	p->on_rq = TASK_ON_RQ_QUEUED;
 	trace_sched_wakeup_new(p);
-
 	check_preempt_curr(rq, p, WF_FORK);
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken) {
@@ -2582,13 +2574,6 @@ void wake_up_new_task(struct task_struct *p)
 	}
 #endif
 	task_rq_unlock(rq, p, &flags);
-#if 1 /* lwg: EXP only, as long as we create the calib3d task, we put it
- 	 	 into PSB */
-	if (p->flags & PF_PSB) {
-		sched_move_task(p);
-		printk("lwg:%s:create PSB process %s[%d], PSB start.\n", __func__, p->comm, (int)p->pid);
-	}
-#endif
 }
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -2974,13 +2959,6 @@ void sched_exec(void)
 	int dest_cpu;
 
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
-
-#if 0
-	if (!strcmp(p->comm, "opencv_test_cal")) {
-		printk("lwg:%s:catch %s[%d]\n", __func__, p->comm, (int)p->pid);
-	}
-#endif
-
 	dest_cpu = p->sched_class->select_task_rq(p, task_cpu(p), SD_BALANCE_EXEC, 0);
 	if (dest_cpu == smp_processor_id())
 		goto unlock;
@@ -3039,7 +3017,6 @@ unsigned long long task_sched_runtime(struct task_struct *p)
 	 */
 	if (task_current(rq, p) && task_on_rq_queued(p)) {
 		update_rq_clock(rq);
-		/* if it's idle class, this doesn't do anything */
 		p->sched_class->update_curr(rq);
 	}
 	ns = p->se.sum_exec_runtime;
@@ -3404,8 +3381,8 @@ static void __sched notrace __schedule(bool preempt)
 	if (psb_can_start) {
 		if (cpu == psb_manager) {
 			struct rq *other = cpu_rq(!cpu);
-//			if (!(next->flags & PF_PSB) && (prev->flags & PF_PSB)) {
-			if ( ((int)prev->pid == psb_pid && (int)next->pid != psb_pid) || (!(next->flags & PF_PSB) && (prev->flags & PF_PSB))) {
+//			raw_spin_lock_irqsave(&rq->lock, flags);
+			if (!(next->flags & PF_PSB) && (prev->flags & PF_PSB)) {
 #if 0
 				printk("lwg:%s:prev = %s, next = %s, send reschedule end to %d running %s[%d]\n",
 						__func__,
@@ -3417,16 +3394,11 @@ static void __sched notrace __schedule(bool preempt)
 #endif
 //				if (rq_in_psb(other))
 					smp_send_reschedule_psb_end(!cpu);
-					off_gpio();
-//				trace_printk("lwg:PSB end\n");
 //				smp_send_reschedule(!cpu);
 //				other->in_psb = 0;
 	//			smp_wmb();
-//			} else if ((next->flags & PF_PSB) && !(prev->flags & PF_PSB)){
-			} else if ( ((int)prev->pid != psb_pid && (int)next->pid == psb_pid) || ((next->flags & PF_PSB) && !(prev->flags & PF_PSB))) {
+			} else if ((next->flags & PF_PSB) && !(prev->flags & PF_PSB)){
 					smp_send_reschedule_psb_start(!cpu);
-					on_gpio();
-//					trace_printk("lwg:PSB start\n");
 #if 0
 					printk("lwg:%s:prev = %s, next = %s, send reschedule start to %d running %s[%d]\n",
 						__func__,
@@ -3436,6 +3408,7 @@ static void __sched notrace __schedule(bool preempt)
 						other->curr->comm,
 						(int)other->curr->pid);
 #endif
+//					smp_send_reschedule(!cpu);
 			//	other->in_psb = 1;
 		//		smp_wmb();
 			}
@@ -3449,7 +3422,6 @@ static void __sched notrace __schedule(bool preempt)
 		rq->nr_switches++;
 		rq->curr = next;
 		++*switch_count;
-
 #if 0
 		if (psb_can_start) {
 			if (cpu != psb_manager) {
@@ -7719,13 +7691,12 @@ void __init sched_init(void)
 	autogroup_init(&init_task);
 
 #endif /* CONFIG_CGROUP_SCHED */
+	// lwg:XXX:initialize per-CPU PSB se here
 	for_each_possible_cpu(i) {
 		struct rq *rq;
 
 		rq = cpu_rq(i);
-		/* lwg:XXX:initialize per-CPU PSB se here */
 		rq->in_psb = -1;
-		rq->psb_loan = 0;
 		raw_spin_lock_init(&rq->lock);
 		rq->nr_running = 0;
 		rq->calc_load_active = 0;
@@ -8123,6 +8094,16 @@ void sched_move_task(struct task_struct *tsk)
 		enqueue_task(rq, tsk, flag);
 	}
 
+#if 0 // lwg:TEST
+	if (tsk->flags & PF_PSB) {
+		if (tsk->sched_task_group == &root_task_group) {
+			printk("lwg:%s:tsk %d root task group...\n", __func__, (int)tsk->pid);
+		} else if (tsk->sched_task_group == psb_group) {
+			printk("lwg:%s:tsk %d psb task group...\n", __func__, (int)tsk->pid);
+		}
+		printk("lwg:%s:examine flags for bodytrack = %08x, pid = %d\n", __func__, tsk->flags, (int)tsk->pid);
+	}
+#endif
 	task_rq_unlock(rq, tsk, &flags);
 }
 #endif /* CONFIG_CGROUP_SCHED */

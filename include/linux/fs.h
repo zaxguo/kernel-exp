@@ -52,6 +52,22 @@ struct swap_info_struct;
 struct seq_file;
 struct workqueue_struct;
 struct iov_iter;
+/* for understanding fs */
+#define TEST_COMM "a.out"
+#define DEBUG_BUFFER 1
+#define DUMP_STACK_LWG()	if(!strcmp(current->comm, TEST_COMM)) { \
+								printk("lwg:%s:%s:executed\n", current->comm, __func__); \
+						}\
+
+#define FUNCTION_PROBE_LWG()	if(!strcmp(current->comm, TEST_COMM)) { \
+							printk("lwg:%s:%d executed\n", __func__, __LINE__); \
+						}\
+
+#define DUMP_CONTENT_LWG(content)	if(!strcmp(current->comm, TEST_COMM)) { \
+							printk("lwg:%s:%s\n", __func__, content); \
+						}\
+
+
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -309,6 +325,8 @@ enum positive_aop_returns {
 #define AOP_FLAG_NOFS			0x0004 /* used by filesystem to direct
 						* helper code (eg buffer layer)
 						* to clear GFP_FS from alloc */
+
+#define AOP_FLAG_OFS			0x0008
 
 /*
  * oh the beauties of C type declarations.
@@ -2459,8 +2477,11 @@ extern int vfs_fsync_range(struct file *file, loff_t start, loff_t end,
 extern int vfs_fsync(struct file *file, int datasync);
 static inline int generic_write_sync(struct file *file, loff_t pos, loff_t count)
 {
-	if (!(file->f_flags & O_DSYNC) && !IS_SYNC(file->f_mapping->host))
+	if (!(file->f_flags & O_DSYNC) && !IS_SYNC(file->f_mapping->host)) {
+//		printk("lwg:%s:don't sync for file %s\n", __func__, file->f_path.dentry->d_iname);
 		return 0;
+	}
+	trace_printk("lwg:%s:sync for file %s\n", __func__, file->f_path.dentry->d_iname);
 	return vfs_fsync_range(file, pos, pos + count - 1,
 			       (file->f_flags & __O_SYNC) ? 0 : 1);
 }

@@ -113,6 +113,10 @@ long strncpy_from_user(char *dst, const char __user *src, long count)
 		retval = do_strncpy_from_user(dst, src, count, max);
 		user_access_end();
 		return retval;
+	} else {
+		printk("lwg:%s:%d:in kernel strncpy", __func__, __LINE__);
+		dst = src;
+		return strlen(dst);
 	}
 	return -EFAULT;
 }

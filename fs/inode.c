@@ -341,6 +341,7 @@ void inc_nlink(struct inode *inode)
 }
 EXPORT_SYMBOL(inc_nlink);
 
+/* This will init per-mapping page tree */
 void address_space_init_once(struct address_space *mapping)
 {
 	memset(mapping, 0, sizeof(*mapping));
@@ -1895,7 +1896,7 @@ void __init inode_init(void)
 	/* Hash may have been set up in inode_init_early */
 	if (!hashdist)
 		return;
-
+	/* lwg: this is interesting */
 	inode_hashtable =
 		alloc_large_system_hash("Inode-cache",
 					sizeof(struct hlist_head),

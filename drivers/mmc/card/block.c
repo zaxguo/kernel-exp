@@ -2131,6 +2131,9 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 	unsigned long flags;
 	unsigned int cmd_flags = req ? req->cmd_flags : 0;
 
+	/* lwg: block layer request will fall here */
+	/* eMMC falls in type 0, SD card is type 1 */
+//	printk("lwg:%s:entered, card type %d\n", __func__, card->type);
 	if (req && !mq->mqrq_prev->req)
 		/* claim host only for the first request */
 		mmc_get_card(card);

@@ -391,6 +391,7 @@ EXPORT_SYMBOL(mpage_readpages);
 /*
  * This isn't called much at all
  */
+/* lwg: get_block is used to map a block to buffer */
 int mpage_readpage(struct page *page, get_block_t get_block)
 {
 	struct bio *bio = NULL;
@@ -401,6 +402,7 @@ int mpage_readpage(struct page *page, get_block_t get_block)
 
 	map_bh.b_state = 0;
 	map_bh.b_size = 0;
+	/* lwg: this is used to prepare bio request */
 	bio = do_mpage_readpage(bio, page, 1, &last_block_in_bio,
 			&map_bh, &first_logical_block, get_block, gfp);
 	if (bio)

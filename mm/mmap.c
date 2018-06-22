@@ -1264,6 +1264,7 @@ static inline int mlock_future_check(struct mm_struct *mm,
 /*
  * The caller must hold down_write(&current->mm->mmap_sem).
  */
+/* lwg: MMAP syscall implementation */
 unsigned long do_mmap(struct file *file, unsigned long addr,
 			unsigned long len, unsigned long prot,
 			unsigned long flags, vm_flags_t vm_flags,
@@ -1626,7 +1627,13 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 		 * new file must not have been exposed to user-space, yet.
 		 */
 		vma->vm_file = get_file(file);
+		/* lwg: calls into file-specific mmap function, dump its addr */
 		error = file->f_op->mmap(file, vma);
+		if (!strcmp(current->comm, "a.out")) {
+			/* we know it's generic_file_mmap */
+			printk("lwg:%s:calling into %pf\n", __func__, file->f_op->mmap);
+		}
+
 		if (error)
 			goto unmap_and_free_vma;
 

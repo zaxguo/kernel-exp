@@ -1,5 +1,4 @@
 /*
-
  *  kernel/sched/core.c
  *
  *  Kernel scheduler and related syscalls
@@ -93,20 +92,6 @@
 
 DEFINE_MUTEX(sched_domains_mutex);
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
-/*
- * lwg: defined in debug.c
- *  */
-extern int psb_manager;
-extern int psb_can_start;
-// lwg:Need to be used with LOCK
-inline bool rq_in_psb(struct rq *rq)
-{
-	return (rq->curr->flags & PF_PSB) || (is_idle_task(rq->curr)) ;
-}
-void on_gpio(void);
-void off_gpio(void);
-
-
 
 static void update_rq_clock_task(struct rq *rq, s64 delta);
 
@@ -1561,22 +1546,8 @@ void kick_process(struct task_struct *p)
 
 	preempt_disable();
 	cpu = task_cpu(p);
-	if ((cpu != smp_processor_id()) && task_curr(p)) {
-		if (p->flags & PF_PSB) {
-		printk_once("lwg:%s:PSB process running on CPU %d currently kicking CPU %d\n",
-				__func__,
-				smp_processor_id(),
-				cpu);
-			if (smp_processor_id() == psb_manager) {
-				smp_send_reschedule_psb_start(cpu);
-			}
-		} else {
-			/*
-			 * lwg: other process can do whatever they wanna do...
-			 * */
-			smp_send_reschedule(cpu);
-		}
-	}
+	if ((cpu != smp_processor_id()) && task_curr(p))
+		smp_send_reschedule(cpu);
 	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(kick_process);
@@ -1746,22 +1717,8 @@ static inline void ttwu_activate(struct rq *rq, struct task_struct *p, int en_fl
 	p->on_rq = TASK_ON_RQ_QUEUED;
 
 	/* if a worker is waking up, notify workqueue */
-	if (p->flags & PF_WQ_WORKER) {
-			wq_worker_waking_up(p, cpu_of(rq));
-		/*
-		 *  lwg:XXX:dirty, if we cannot stop worker from waking up,
-		 *  we should at least notify other CPU
-		 */
-#if 0
-		int this_cpu = smp_processor_id();
-		if (this_cpu == psb_manager) {
-			struct rq *other = cpu_rq(!this_cpu);
-			if (rq_in_psb(other)) {
-				smp_send_reschedule_psb_end(!this_cpu);
-			}
-		}
-#endif
-	}
+	if (p->flags & PF_WQ_WORKER)
+		wq_worker_waking_up(p, cpu_of(rq));
 }
 
 /*
@@ -1772,7 +1729,6 @@ ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
 	check_preempt_curr(rq, p, wake_flags);
 	p->state = TASK_RUNNING;
-	int this_cpu = smp_processor_id();
 	trace_sched_wakeup(p);
 
 #ifdef CONFIG_SMP
@@ -1797,19 +1753,6 @@ ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 
 		rq->idle_stamp = 0;
 	}
-	/*
-	 *  lwg:XXX: should handle wakeup task
-	 */
-#if 0
-	if (this_cpu == psb_manager) {
-		if (p->flags & PF_PSB) {
-			smp_send_reschedule_psb_start(!this_cpu);
-		} else {
-			smp_send_reschedule_psb_end(!this_cpu);
-		}
-	}
-#endif
-
 #endif
 }
 
@@ -1817,16 +1760,6 @@ static void
 ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags)
 {
 	lockdep_assert_held(&rq->lock);
-
-#if 0 /* lwg:XXX: the bottom line is we cannot touch worker wakeup... */
-	int this_cpu = smp_processor_id();
-	if (psb_group != NULL && this_cpu == psb_manager) {
-		if (rq_in_psb(cpu_rq(!this_cpu))) {
-			if (!(p->flags & PF_PSB))
-				return;
-		}
-	}
-#endif
 
 #ifdef CONFIG_SMP
 	if (p->sched_contributes_to_load)
@@ -1862,6 +1795,11 @@ static int ttwu_remote(struct task_struct *p, int wake_flags)
 
 #ifdef CONFIG_SMP
 int in_psb = 0;
+// lwg:Need to be used with LOCK
+inline bool rq_in_psb(struct rq *rq)
+{
+	return (rq->curr->flags & PF_PSB);
+}
 
 
 void sched_ttwu_pending(void)
@@ -1894,23 +1832,60 @@ void scheduler_ipi_psb(int start)
 	struct task_struct *curr;
 	int this_cpu;
 	unsigned long flags;
+	// working
 
 	// lwg:steal this from below
+	preempt_fold_need_resched();
+
+#if 0
+	if (llist_empty(&this_rq()->wake_list) && !got_nohz_idle_kick())
+		return;
+#endif
+
+	irq_enter();
 	this_cpu = smp_processor_id();
 	rq = cpu_rq(this_cpu);
-	BUG_ON(this_cpu == psb_manager);
+#if 0
+	if (!raw_spin_trylock_irqsave(&rq->lock, flags)) {
+		printk("lwg:%s:cannot lock rq, return\n", __func__);
+		irq_exit();
+		return;
+	}
+#endif
+	raw_spin_lock_irqsave(&rq->lock, flags);
+	lockdep_pin_lock(&rq->lock);
 
-	resched_curr(rq); // lwg:XXX:will only set the flag
-	irq_enter();
+	curr = rq->curr;
+#ifdef PSB_DEBUG
 	if (start) {
 		rq->in_psb = 1;
+		if (rq_in_psb(rq)) {
+			goto out;
+		}
 		rq->cfs.skip = NULL;
-//		printk("lwg:%s:START received %s[%d] running on CPU %d\n", __func__, rq->curr->comm, (int)rq->curr->pid, this_cpu);
+		resched_curr(rq); // lwg:XXX:will only set the flag
+#if 0
+		printk("lwg:%s:current %s[%d] on %d, need to reschedule\n",
+				__func__,
+				curr->comm,
+				(int)curr->pid,
+				this_cpu);
+#endif
+
 	} else {
 		rq->in_psb = 0;
-		rq->cfs.skip = psb_group->se[this_cpu];
-//		printk("lwg:%s:END received %s[%d] running on CPU %d\n", __func__, rq->curr, (int)rq->curr->pid, this_cpu);
+		if (!rq_in_psb(rq)) {
+			goto out;
+		}
+		rq->cfs.skip = psb_group->se[this_cpu]; //lwg: LOL will only work on high-load system
+		resched_curr(rq); // lwg:XXX:will only set the flag
+//		printk("lwg:%s:psb ended on %d\n", __func__, this_cpu);
 	}
+out:
+	lockdep_unpin_lock(&rq->lock);
+	raw_spin_unlock_irqrestore(&rq->lock, flags);
+#endif
+
 	irq_exit();
 }
 
@@ -1921,37 +1896,6 @@ void scheduler_ipi(void)
 	 * TIF_NEED_RESCHED remotely (for the first time) will also send
 	 * this IPI.
 	 */
-	int this_cpu = smp_processor_id();
-	/*
-	 * lwg: if this is from manager CPU ---
-	 * */
-	/* TODO: handle idle_kick from manager CPU when in PSB!!
-	 * TODO: get rid of RCU since there are only 1 updaters??
-	 * */
-#if 0
-	if (psb_can_start) {
-		if (this_cpu != psb_manager) {
-			if (got_nohz_idle_kick()) {
-				irq_enter();
-				struct rq *other = cpu_rq(!this_cpu);
-				if (other->curr->flags & PF_PSB) {
-					smp_rmb();
-					this_rq()->in_psb = 1;
-				//	preempt_set_need_resched();
-					preempt_fold_need_resched();
-				} else {
-					this_rq()->in_psb = 0;
-					preempt_fold_need_resched();
-				}
-				irq_exit();
-				return;
-			}
-		}
-	}
-#endif
-
-
-
 	preempt_fold_need_resched();
 
 	if (llist_empty(&this_rq()->wake_list) && !got_nohz_idle_kick())
@@ -1976,24 +1920,8 @@ void scheduler_ipi(void)
 	 * Check if someone kicked us for doing the nohz idle load balance.
 	 */
 	if (unlikely(got_nohz_idle_kick())) {
-#if 0
-		int this_cpu = smp_processor_id();
-		if (psb_group != NULL && this_cpu == psb_manager) {
-			if (cpu_rq(!this_cpu)->curr->flags & PF_PSB) {
-				printk_once("lwg:%s:NO HZ TICK CPU on %d, other running PSB process\n",
-						__func__, this_cpu);
-				irq_exit();
-				return;
-			}
-		}
-#endif
 		this_rq()->idle_balance = 1;
 		raise_softirq_irqoff(SCHED_SOFTIRQ);
-#if 0
-		if (psb_group != NULL && this_cpu != psb_manager) {
-			printk("lwg:%s:current running %s with irq OFF\n", __func__, this_rq()->curr->comm);
-		}
-#endif
 	}
 	irq_exit();
 }
@@ -2562,13 +2490,10 @@ void wake_up_new_task(struct task_struct *p)
 	set_task_cpu(p, select_task_rq(p, task_cpu(p), SD_BALANCE_FORK, 0));
 #endif
 
-
-
 	rq = __task_rq_lock(p);
 	activate_task(rq, p, 0);
 	p->on_rq = TASK_ON_RQ_QUEUED;
 	trace_sched_wakeup_new(p);
-
 	check_preempt_curr(rq, p, WF_FORK);
 #ifdef CONFIG_SMP
 	if (p->sched_class->task_woken) {
@@ -2582,13 +2507,6 @@ void wake_up_new_task(struct task_struct *p)
 	}
 #endif
 	task_rq_unlock(rq, p, &flags);
-#if 1 /* lwg: EXP only, as long as we create the calib3d task, we put it
- 	 	 into PSB */
-	if (p->flags & PF_PSB) {
-		sched_move_task(p);
-		printk("lwg:%s:create PSB process %s[%d], PSB start.\n", __func__, p->comm, (int)p->pid);
-	}
-#endif
 }
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -2974,13 +2892,6 @@ void sched_exec(void)
 	int dest_cpu;
 
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
-
-#if 0
-	if (!strcmp(p->comm, "opencv_test_cal")) {
-		printk("lwg:%s:catch %s[%d]\n", __func__, p->comm, (int)p->pid);
-	}
-#endif
-
 	dest_cpu = p->sched_class->select_task_rq(p, task_cpu(p), SD_BALANCE_EXEC, 0);
 	if (dest_cpu == smp_processor_id())
 		goto unlock;
@@ -3039,7 +2950,6 @@ unsigned long long task_sched_runtime(struct task_struct *p)
 	 */
 	if (task_current(rq, p) && task_on_rq_queued(p)) {
 		update_rq_clock(rq);
-		/* if it's idle class, this doesn't do anything */
 		p->sched_class->update_curr(rq);
 	}
 	ns = p->se.sum_exec_runtime;
@@ -3230,48 +3140,31 @@ pick_next_task(struct rq *rq, struct task_struct *prev)
 	 * Optimization: we know that if all tasks are in
 	 * the fair class we can call that function directly:
 	 */
-
 	if (likely(prev->sched_class == class &&
 		   rq->nr_running == rq->cfs.h_nr_running)) {
 		p = fair_sched_class.pick_next_task(rq, prev);
+
 #if 0
-		if (psb_can_start) {
-			int cpu = smp_processor_id();
-			if (cpu != psb_manager && p != NULL) {
-				if ((p->flags & PF_PSB) && !(rq->in_psb)) {
-					if (!rq_in_psb(cpu_rq(!cpu))) {
-						printk("lwg:%s:%d: still picking %s[%d] on %d, in_psb = %d, other running %s\n",
-							__func__, __LINE__,p->comm, (int)p->pid, cpu, rq->in_psb, cpu_rq(!cpu)->curr->comm);
-						printk("next->se = %p, se->cfs_rq = %p, rq->idle = %p, idle->se = %p\n",
-								&p->se,
-								p->se.cfs_rq,
-								rq->idle,
-								&rq->idle->se);
-//						dump_stack();
-						put_prev_task(rq, p);
-						p = NULL;
-					}
-				}
-			}
+		if (rq->in_psb && !(p->flags & PF_PSB)) {
+			put_prev_task(rq, p);
+			p = NULL;
 		}
 #endif
 
-		/* lwg:by the time we got here we may get more runnable task */
-//		if (unlikely((p == RETRY_TASK) && (rq->in_psb))) {
-		if (unlikely((p == RETRY_TASK))) {
+		if (unlikely(p == RETRY_TASK))
 			goto again;
-		}
 
 		/* assumes fair_sched_class->next == idle_sched_class */
-		if (unlikely(!p)) {
+		if (unlikely(!p))
 			p = idle_sched_class.pick_next_task(rq, prev);
+
 #if 0
-			if (rq->in_psb == 0 && psb_can_start) {
-				printk("lwg:%s:CPU %d doesn't really have a thing to do, while %d runnable\n",
-						__func__, smp_processor_id(), rq->cfs.nr_running);
-			}
-#endif
+		if (!(p->flags & PF_PSB)) {
+				rq->in_psb = 0;
 		}
+#endif
+
+
 
 		return p;
 	}
@@ -3282,6 +3175,10 @@ again:
 		if (p) {
 			if (unlikely(p == RETRY_TASK))
 				goto again;
+
+			if (!(p->flags & PF_PSB)) {
+				rq->in_psb = 0;
+			}
 
 			return p;
 		}
@@ -3383,9 +3280,7 @@ static void __sched notrace __schedule(bool preempt)
 			 */
 			if (prev->flags & PF_WQ_WORKER) {
 				struct task_struct *to_wakeup;
-				/*
-				 * lwg: we may want to disable this!
-				 * */
+
 				to_wakeup = wq_worker_sleeping(prev, cpu);
 				if (to_wakeup)
 					try_to_wake_up_local(to_wakeup);
@@ -3397,50 +3292,12 @@ static void __sched notrace __schedule(bool preempt)
 	if (task_on_rq_queued(prev))
 		update_rq_clock(rq);
 
-
-	/* lwg: actually ``next'' being picked here will be PSB process which is incorrect*/
 	next = pick_next_task(rq, prev);
 
-	if (psb_can_start) {
-		if (cpu == psb_manager) {
-			struct rq *other = cpu_rq(!cpu);
-//			if (!(next->flags & PF_PSB) && (prev->flags & PF_PSB)) {
-			if ( ((int)prev->pid == psb_pid && (int)next->pid != psb_pid) || (!(next->flags & PF_PSB) && (prev->flags & PF_PSB))) {
 #if 0
-				printk("lwg:%s:prev = %s, next = %s, send reschedule end to %d running %s[%d]\n",
-						__func__,
-						prev->comm,errors
-						next->comm,
-						!cpu,
-						other->curr->comm,
-						(int)other->curr->pid);
+	if (psb_group)
+		printk_once("lwg:%s:pick next %s:[%d], CPU %d\n", __func__, next->comm, (int)next->pid, smp_processor_id());
 #endif
-//				if (rq_in_psb(other))
-					smp_send_reschedule_psb_end(!cpu);
-					off_gpio();
-//				trace_printk("lwg:PSB end\n");
-//				smp_send_reschedule(!cpu);
-//				other->in_psb = 0;
-	//			smp_wmb();
-//			} else if ((next->flags & PF_PSB) && !(prev->flags & PF_PSB)){
-			} else if ( ((int)prev->pid != psb_pid && (int)next->pid == psb_pid) || ((next->flags & PF_PSB) && !(prev->flags & PF_PSB))) {
-					smp_send_reschedule_psb_start(!cpu);
-					on_gpio();
-//					trace_printk("lwg:PSB start\n");
-#if 0
-					printk("lwg:%s:prev = %s, next = %s, send reschedule start to %d running %s[%d]\n",
-						__func__,
-						prev->comm,
-						next->comm,
-						!cpu,
-						other->curr->comm,
-						(int)other->curr->pid);
-#endif
-			//	other->in_psb = 1;
-		//		smp_wmb();
-			}
-		}
-	}
 	clear_tsk_need_resched(prev);
 	clear_preempt_need_resched();
 	rq->clock_skip_update = 0;
@@ -3450,31 +3307,7 @@ static void __sched notrace __schedule(bool preempt)
 		rq->curr = next;
 		++*switch_count;
 
-#if 0
-		if (psb_can_start) {
-			if (cpu != psb_manager) {
-				if ((next->flags & PF_PSB) && !(rq->in_psb)) {
-					smp_rmb();
-					if (!rq_in_psb(cpu_rq(!cpu))) {
-						printk("lwg:%s: still picking %s[%d] on %d, in_psb = %d, other running %s\n",
-							__func__, next->comm, (int)next->pid, cpu, rq->in_psb, cpu_rq(!cpu)->curr->comm);
-						printk("next->se = %p, se->cfs_rq = %p, rq->idle = %p, idle->se = %p\n",
-								&next->se,
-								next->se.cfs_rq,
-								rq->idle,
-								&rq->idle->se);
-						BUG();
-					}
-				}
-			}
-		}
-#endif
 		trace_sched_switch(preempt, prev, next);
-		/*
-		 * lwg: why do we need so many safety nets???
-		 * */
-
-
 		rq = context_switch(rq, prev, next); /* unlocks the rq */
 		cpu = cpu_of(rq);
 	} else {
@@ -7719,13 +7552,11 @@ void __init sched_init(void)
 	autogroup_init(&init_task);
 
 #endif /* CONFIG_CGROUP_SCHED */
+	// lwg:XXX:initialize per-CPU PSB se here
 	for_each_possible_cpu(i) {
 		struct rq *rq;
 
 		rq = cpu_rq(i);
-		/* lwg:XXX:initialize per-CPU PSB se here */
-		rq->in_psb = -1;
-		rq->psb_loan = 0;
 		raw_spin_lock_init(&rq->lock);
 		rq->nr_running = 0;
 		rq->calc_load_active = 0;
@@ -8109,20 +7940,20 @@ void sched_move_task(struct task_struct *tsk)
 #endif
 		set_task_rq(tsk, task_cpu(tsk));
 
-	if (unlikely(running)) {
-		if (tsk->flags & PF_PSB)
-			printk("lwg:%s:%d PSB running set it to current\n", __func__, __LINE__);
+	if (unlikely(running))
 		tsk->sched_class->set_curr_task(rq);
-	}
-	if (queued) {
-		int flag = ENQUEUE_RESTORE;
-		if (tsk->flags & PF_PSB) {
-//			flag = ENQUEUE_WAKEUP;
-			printk("lwg:%s:setting PSB process [%d] ENQUEUE_WAKEUP flag\n", __func__, (int)tsk->pid);
-		}
-		enqueue_task(rq, tsk, flag);
-	}
+	if (queued)
+		enqueue_task(rq, tsk, ENQUEUE_RESTORE);
 
+#if 1 // lwg:TEST
+	if (tsk->flags & PF_PSB) {
+		if (tsk->sched_task_group == &root_task_group) {
+			printk("lwg:%s:tsk %d root task group...\n", __func__, (int)tsk->pid);
+		} else if (tsk->sched_task_group == psb_group) {
+			printk("lwg:%s:tsk %d psb task group...\n", __func__, (int)tsk->pid);
+		}
+	}
+#endif
 	task_rq_unlock(rq, tsk, &flags);
 }
 #endif /* CONFIG_CGROUP_SCHED */

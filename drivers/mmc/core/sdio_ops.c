@@ -108,6 +108,7 @@ static int mmc_io_rw_direct_host(struct mmc_host *host, int write, unsigned fn,
 			*out = cmd.resp[0] & 0xFF;
 	}
 
+	printk("lwg:%s:entered\n", __func__);
 	return 0;
 }
 

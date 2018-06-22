@@ -88,6 +88,7 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/task.h>
 
+
 /*
  * Minimum number of threads to boot the kernel
  */
@@ -1360,6 +1361,10 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
 	p->flags &= ~(PF_SUPERPRIV | PF_WQ_WORKER);
 	p->flags |= PF_FORKNOEXEC;
+	/* lwg: we copy over the PSB flag */
+	if (current->flags & PF_PSB) {
+		p->flags |= PF_PSB;
+	}
 	INIT_LIST_HEAD(&p->children);
 	INIT_LIST_HEAD(&p->sibling);
 	rcu_copy_process(p);
@@ -1767,7 +1772,9 @@ long _do_fork(unsigned long clone_flags,
 			get_task_struct(p);
 		}
 
+
 		wake_up_new_task(p);
+
 
 		/* forking complete and child started to run, tell ptracer */
 		if (unlikely(trace))

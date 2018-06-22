@@ -182,6 +182,7 @@ SYSCALL_DEFINE1(syncfs, int, fd)
  */
 int vfs_fsync_range(struct file *file, loff_t start, loff_t end, int datasync)
 {
+	DUMP_STACK_LWG();
 	struct inode *inode = file->f_mapping->host;
 
 	if (!file->f_op->fsync)

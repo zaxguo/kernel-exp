@@ -117,6 +117,7 @@ static struct optee_session *find_session(struct optee_context_data *ctxdata,
  *
  * Returns return code from secure world, 0 is OK
  */
+/* lwg: XXX: important, pass the param in shm */
 u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg)
 {
 	struct optee *optee = tee_get_drvdata(ctx->teedev);
@@ -142,6 +143,7 @@ u32 optee_do_call_with_arg(struct tee_context *ctx, phys_addr_t parg)
 			 */
 			optee_cq_wait_for_completion(&optee->call_queue, &w);
 		} else if (OPTEE_SMC_RETURN_IS_RPC(res.a0)) {
+			/* lwg: copy over the parameters */
 			param.a0 = res.a0;
 			param.a1 = res.a1;
 			param.a2 = res.a2;
@@ -304,6 +306,7 @@ int optee_close_session(struct tee_context *ctx, u32 session)
 int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 		      struct tee_param *param)
 {
+
 	struct optee_context_data *ctxdata = ctx->data;
 	struct tee_shm *shm;
 	struct optee_msg_arg *msg_arg;
@@ -318,7 +321,7 @@ int optee_invoke_func(struct tee_context *ctx, struct tee_ioctl_invoke_arg *arg,
 	mutex_unlock(&ctxdata->mutex);
 	if (!sess)
 		return -EINVAL;
-
+	/* lwg: look into this...alloc shared memory to pass arguments */
 	shm = get_msg_arg(ctx, arg->num_params, &msg_arg, &msg_parg);
 	if (IS_ERR(shm))
 		return PTR_ERR(shm);

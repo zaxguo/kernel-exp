@@ -459,6 +459,8 @@ void set_page_address(struct page *page, void *virtual)
 
 		spin_lock_irqsave(&pas->lock, flags);
 		list_add_tail(&pam->list, &pas->lh);
+		if (page->private == 0xdeadbeef)
+			printk("lwg:%s:%d:page [%p] set to [%p]\n", __func__, __LINE__,  (void*)page, virtual);
 		spin_unlock_irqrestore(&pas->lock, flags);
 	} else {		/* Remove */
 		spin_lock_irqsave(&pas->lock, flags);

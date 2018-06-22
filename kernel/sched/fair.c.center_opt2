@@ -754,35 +754,6 @@ static void update_curr(struct cfs_rq *cfs_rq)
 		}
 	}
 	delta_exec = now - curr->exec_start;
-	/* we double the exec time for SE is that from either view, no matter idle or not,
-	 * the PSB will always occupy other cores */
-#if 1
-	/* lwg: The heuristics work like this:
-	 * Orig = CPU/# of Runnable task, now the ``single-threaded'' psb task kicks in,
-	 * it and the other idle task takes each of the half 1/n share, so the delta_exec should increase
-	 * 2 * n times faster to maintain fairness for other applications */
-	if (psb_can_start) {
-		int this_cpu = smp_processor_id();
-		if (this_cpu == psb_manager) {
-			if (curr == psb_group->se[this_cpu]) {
-				int factor;
-				int runnable_task = 0;
-				int i;
-				for_each_online_cpu(i) {
-					rcu_read_lock();
-					struct rq* rq = cpu_rq(i);
-					runnable_task += rq->nr_running;
-					rcu_read_unlock();
-				}
-				factor = runnable_task * num_online_cpus();
-//				factor = 5;
-				factor -= 2;
-				delta_exec *= factor;
-				printk_once("lwg:%s:%d times delta_exec\n", __func__, factor);
-			}
-		}
-	}
-#endif
 	if (unlikely((s64)delta_exec <= 0))
 		return;
 
@@ -3351,7 +3322,13 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 	int this_cpu = smp_processor_id();
 	/* lwg: this is PER-cpu rq which has PSB flag */
 	struct rq *rq =  cpu_rq(this_cpu);
-
+#if 0
+	/* lwg: this never fixes a bug, this only hides one */
+	if (!curr && !left) {
+		printk("lwg:%s:WTF??\n",__func__);
+		return NULL;
+	}
+#endif
 
 
 	/*
@@ -3374,12 +3351,10 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 			second = __pick_first_entity(cfs_rq);
 		} else {
 			second = __pick_next_entity(se);
-			/* lwg: meaning curr is before second (curr->vruntime < second->vruntime) */
 			if (!second || (curr && entity_before(curr, second)))
 				second = curr;
 		}
-		/* lwg: < 1 means vruntime of second is smaller than it of left, so that
-		 * second can run */
+
 		if (second && wakeup_preempt_entity(second, left) < 1)
 			se = second;
 	}
@@ -3394,8 +3369,6 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 
 	/*
 	 * Someone really wants this to run. If it's not unfair, run it.
-	 * lwg: --- works if it's not ``too'' unfair because it still checks
-	 * the diffs of vruntime
 	 */
 	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1)
 		se = cfs_rq->next;
@@ -3403,38 +3376,28 @@ pick_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *curr)
 #if 0
 	/* lwg: now let's examine the picked se */
 	if (psb_can_start) {
-			/* lwg: do accounting for co-scheduled CPU */
 			if (this_cpu != psb_manager) {
 				if (rq->in_psb == 0) {
 					/* lwg:TODO:when in_psb == 0, others want to run PSB process but it's not possible
-					 * So do some accouting here -- pay back loan
+					 * So do some accouting here
 					 * */
 					if (se == psb_group->se[this_cpu]) {
+						printk("lwg:%s:YOU CANNOT POSSIBLY GO HERE\n", __func__);
 						se = __pick_next_entity(se);
-						if (!se) { /* really no task to run?? */
-							rq->psb_loan -= cfs_rq->min_vruntime;
+						if (!se)
 							return NULL;
-						} else { /* payback */
-							u64 diff = se->vruntime - psb_group->se[this_cpu]->vruntime;
-							/* should we add some vruntime to avoid being picked next time? */
-							/* lwg: we probably shouldn't -- just let it keep paying back...*/
-							psb_group->se[this_cpu]->vruntime += cfs_rq->min_vruntime;
-							/* the newly picked se should have a larger vruntime */
-							WARN_ON(diff < 0);
-							rq->psb_loan -= diff;
-						}
 					}
 				} else if (rq->in_psb == 1) {
+#if 0
 					if (se != psb_group->se[this_cpu]) {
 						/* lwg:TODO:OTHERS WANT TO RUN BUT ITS NOT POSSIBLE
 						 * SO JUST DO SOME ACCOUNTING HERE */
-						se = psb_group->se[this_cpu];
-						/* we loan some time here */
-						u64 diff = se->vruntime - left->vruntime;
-						/* our group se shouldn't be left node thus having greater vruntime */
-						WARN_ON(diff < 0);
-						rq->psb_loan += diff;
+						if (cfs_rq->nr_running)
+							se = psb_group->se[this_cpu];
+						else
+							return NULL;
 					}
+#endif
 				}
 			}
 		}
@@ -4343,7 +4306,6 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 	struct cfs_rq *cfs_rq;
 	struct sched_entity *se = &p->se;
 
-
 	// lwg:iterate through se->parent
 	for_each_sched_entity(se) {
 		if (se->on_rq)
@@ -4418,7 +4380,6 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 			 * Bias pick_next to pick a task from this cfs_rq, as
 			 * p is sleeping when it is within its sched_slice.
 			 */
-			/* lwg: KEEP the parent as ``next'' buddy */
 			if (task_sleep && parent_entity(se))
 				set_next_buddy(parent_entity(se));
 
@@ -5533,6 +5494,39 @@ again:
 
 	p = task_of(se);
 
+#if 0 /* lwg: this passed */
+	if (psb_group != NULL) {
+		// lwg: manager decides whether other core should be in PSB
+		if (this_cpu != psb_manager) {
+				/*
+				 * lwg: for NON-manager node to debug...
+				 * */
+			if (rq->in_psb == 0) {
+				if (p->flags & PF_PSB) {
+	//				dump_stack();
+					printk_once("picking PSB process while out of PSB on CPU %d, se = %p on cfs_rq = %p!!!!\n",
+							this_cpu,
+							se,
+							se->cfs_rq);
+					printk_once("process %s[%d]\n", p->comm, (int)p->pid);
+					printk_once("per-cpu cfs 0 = %p, cfs 1 = %p\n", &cpu_rq(0)->cfs, &cpu_rq(1)->cfs);
+					printk_once("psb group se on 0 = %p, se on 1 = %p\n cfs_rq on 0 = %p, cfs_rq on 1 = %p\n",
+							psb_group->se[0], psb_group->se[1],
+							psb_group->cfs_rq[0], psb_group->cfs_rq[1]);
+				}
+			} else if (rq->in_psb == 1) {
+				if (!(p->flags & PF_PSB)) {
+					printk_once("picking NON-PSB process %s[%d] while in psb, flags = %08x!!\n",
+							p->comm,
+							(int)p->pid,
+							p->flags);
+	//					dump_stack();
+						}
+				}
+
+			}
+	}
+#endif
 
 	/*
 	 * Since we haven't yet done put_prev_entity and if the selected task

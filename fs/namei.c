@@ -131,7 +131,7 @@ getname_flags(const char __user *filename, int flags, int *empty)
 	result = audit_reusename(filename);
 	if (result)
 		return result;
-
+	/* lwg: alloc a memory region in slab cache */
 	result = __getname();
 	if (unlikely(!result))
 		return ERR_PTR(-ENOMEM);
@@ -458,7 +458,7 @@ static int sb_permission(struct super_block *sb, struct inode *inode, int mask)
 int inode_permission(struct inode *inode, int mask)
 {
 	int retval;
-
+	/* lwg: 0 on success */
 	retval = sb_permission(inode->i_sb, inode, mask);
 	if (retval)
 		return retval;
@@ -1490,6 +1490,9 @@ static struct dentry *lookup_dcache(struct qstr *name, struct dentry *dir,
  *
  * dir->d_inode->i_mutex must be held
  */
+
+/* lwg: this will be called for the first time when accessing the FS
+ * 'cd' won't trigger this but 'ls' will */
 static struct dentry *lookup_real(struct inode *dir, struct dentry *dentry,
 				  unsigned int flags)
 {
@@ -1500,7 +1503,7 @@ static struct dentry *lookup_real(struct inode *dir, struct dentry *dentry,
 		dput(dentry);
 		return ERR_PTR(-ENOENT);
 	}
-
+	/* lwg: goes to ext2_lookup */
 	old = dir->i_op->lookup(dir, dentry, flags);
 	if (unlikely(old)) {
 		dput(dentry);
@@ -1508,7 +1511,7 @@ static struct dentry *lookup_real(struct inode *dir, struct dentry *dentry,
 	}
 	return dentry;
 }
-
+/* lwg: pass &nd->last, dentry */
 static struct dentry *__lookup_hash(struct qstr *name,
 		struct dentry *base, unsigned int flags)
 {
@@ -1553,6 +1556,7 @@ static int lookup_fast(struct nameidata *nd,
 		 * This sequence count validates that the inode matches
 		 * the dentry name information from lookup.
 		 */
+		/* lwg: return dentry->d_inode */
 		*inode = d_backing_inode(dentry);
 		negative = d_is_negative(dentry);
 		if (read_seqcount_retry(&dentry->d_seq, seq))
@@ -1618,6 +1622,7 @@ unlazy:
 	err = follow_managed(path, nd);
 	if (likely(!err))
 		*inode = d_backing_inode(path->dentry);
+	DUMP_CONTENT_LWG(path->dentry->d_iname);
 	return err;
 
 need_lookup:
@@ -1740,11 +1745,13 @@ static int walk_component(struct nameidata *nd, int flags)
 			put_link(nd);
 		return err;
 	}
+	/* lwg: this will lookup in dentry hash table */
 	err = lookup_fast(nd, &path, &inode, &seq);
 	if (unlikely(err)) {
 		if (err < 0)
 			return err;
-
+		/* lwg: first try hashtable one more time, if still no,
+		 * call into inode_ops lookup function to lookup in real FS */
 		err = lookup_slow(nd, &path);
 		if (err < 0)
 			return err;
@@ -1899,6 +1906,8 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 {
 	int err;
 
+	DUMP_CONTENT_LWG(name);
+
 	while (*name=='/')
 		name++;
 	if (!*name)
@@ -1908,7 +1917,7 @@ static int link_path_walk(const char *name, struct nameidata *nd)
 	for(;;) {
 		u64 hash_len;
 		int type;
-
+		/* lwg: check inode for permission, note it's already in-memory */
 		err = may_lookup(nd);
  		if (err)
 			return err;
@@ -2004,9 +2013,12 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 	nd->flags = flags | LOOKUP_JUMPED | LOOKUP_PARENT;
 	nd->depth = 0;
 	if (flags & LOOKUP_ROOT) {
+		/* lwg: this won't be called */
+//		DUMP_STACK_LWG();
 		struct dentry *root = nd->root.dentry;
 		struct inode *inode = root->d_inode;
 		if (*s) {
+			/* lwg: if it is a directory to lookup */
 			if (!d_can_lookup(root))
 				return ERR_PTR(-ENOTDIR);
 			retval = inode_permission(inode, MAY_EXEC);
@@ -2025,21 +2037,30 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 		}
 		return s;
 	}
-
+	/* lwg: called multiple times */
+//	DUMP_STACK_LWG();
+	if (!strcmp(current->comm, TEST_COMM)) {
+		printk("lwg:%s:resolving %s\n", __func__, s);
+	}
 	nd->root.mnt = NULL;
 
 	nd->m_seq = read_seqbegin(&mount_lock);
 	if (*s == '/') {
+		/* lwg: resolving "/aaa/bbb/ccc" resolve start from root */
+//		FUNCTION_PROBE_LWG();
 		if (flags & LOOKUP_RCU) {
 			rcu_read_lock();
 			set_root_rcu(nd);
 			nd->seq = nd->root_seq;
 		} else {
+			/* lwg: the root is stored in fs_struct */
 			set_root(nd);
 			path_get(&nd->root);
 		}
 		nd->path = nd->root;
 	} else if (nd->dfd == AT_FDCWD) {
+		/* lwg: at current working directory resolving "FILENAME.txt" */
+//		FUNCTION_PROBE_LWG();
 		if (flags & LOOKUP_RCU) {
 			struct fs_struct *fs = current->fs;
 			unsigned seq;
@@ -2048,14 +2069,20 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 
 			do {
 				seq = read_seqcount_begin(&fs->seq);
+				/* set nd->path to fs->pwd */
 				nd->path = fs->pwd;
 				nd->seq = __read_seqcount_begin(&nd->path.dentry->d_seq);
 			} while (read_seqcount_retry(&fs->seq, seq));
 		} else {
+			FUNCTION_PROBE_LWG();
+			/* lwg: set nd->path = fs->pwd */
+			/* current->fs has is created by fork which also forks fs_struct
+			 * i.e. inherits pwd, root, d_inode,etc */
 			get_fs_pwd(current->fs, &nd->path);
 		}
 	} else {
 		/* Caller must check execute permissions on the starting path component */
+//		FUNCTION_PROBE_LWG();
 		struct fd f = fdget_raw(nd->dfd);
 		struct dentry *dentry;
 
@@ -2084,6 +2111,8 @@ static const char *path_init(struct nameidata *nd, unsigned flags)
 		return s;
 	}
 
+//	FUNCTION_PROBE_LWG();
+	/* lwg: setup inode!! */
 	nd->inode = nd->path.dentry->d_inode;
 	if (!(flags & LOOKUP_RCU))
 		return s;
@@ -3039,6 +3068,7 @@ static int do_last(struct nameidata *nd,
 			nd->flags |= LOOKUP_FOLLOW | LOOKUP_DIRECTORY;
 		/* we _can_ be in RCU mode here */
 		error = lookup_fast(nd, &path, &inode, &seq);
+//		DUMP_CONTENT_LWG(nd->path.dentry->d_iname);
 		if (likely(!error))
 			goto finish_lookup;
 
@@ -3182,6 +3212,8 @@ finish_open_created:
 		goto out;
 
 	BUG_ON(*opened & FILE_OPENED); /* once it's opened, it's opened */
+	/* lwg: the actual function that maps the file to memory... */
+	DUMP_CONTENT_LWG(nd->path.dentry->d_iname);
 	error = vfs_open(&nd->path, file, current_cred());
 	if (!error) {
 		*opened |= FILE_OPENED;
@@ -3293,10 +3325,12 @@ out:
 	path_put(&path);
 	return error;
 }
-
+/* lwg: the main function to open a file given a filename
+ * the ultimate goal is to find ``dentry'' */
 static struct file *path_openat(struct nameidata *nd,
 			const struct open_flags *op, unsigned flags)
 {
+	/* lwg: the nameidata get passed in stores filename, path */
 	const char *s;
 	struct file *file;
 	int opened = 0;
@@ -3312,14 +3346,20 @@ static struct file *path_openat(struct nameidata *nd,
 		error = do_tmpfile(nd, flags, op, file, &opened);
 		goto out2;
 	}
-
+	/* lwg: this setup the path struct -- setup vfsmount as the tree root, set
+	 * nd->inode as nd->path.dentry->d_inode, increment dentry refcount. Note current->fs cached
+	 * current working directory as in fs->pwd */
 	s = path_init(nd, flags);
 	if (IS_ERR(s)) {
 		put_filp(file);
 		return ERR_CAST(s);
 	}
+	/* lwg: link_path_walk finds the dentry for the file and stored it in nd
+	 * do_last gets the dentry's inode and set the memory mapping of the file
+	 * according to inode->i_mapping */
 	while (!(error = link_path_walk(s, nd)) &&
 		(error = do_last(nd, file, op, &opened)) > 0) {
+//		DUMP_CONTENT_LWG("Am I here?"); // Yes you are
 		nd->flags &= ~(LOOKUP_OPEN|LOOKUP_CREATE|LOOKUP_EXCL);
 		s = trailing_symlink(nd);
 		if (IS_ERR(s)) {
@@ -3342,6 +3382,7 @@ out2:
 		}
 		file = ERR_PTR(error);
 	}
+	DUMP_CONTENT_LWG("finished\n");
 	return file;
 }
 
@@ -3351,13 +3392,16 @@ struct file *do_filp_open(int dfd, struct filename *pathname,
 	struct nameidata nd;
 	int flags = op->lookup_flags;
 	struct file *filp;
-
+	/* lwg: nameidata -- a bundle with inode, path, old nameidata from current->nameidata, etc..
+	 * will save the old nameidata to nd->saved, then put current->nameidata equals nd, which is newly
+	 * created. */
 	set_nameidata(&nd, dfd, pathname);
 	filp = path_openat(&nd, op, flags | LOOKUP_RCU);
 	if (unlikely(filp == ERR_PTR(-ECHILD)))
 		filp = path_openat(&nd, op, flags);
 	if (unlikely(filp == ERR_PTR(-ESTALE)))
 		filp = path_openat(&nd, op, flags | LOOKUP_REVAL);
+	/* lwg: why restore the old data?? */
 	restore_nameidata();
 	return filp;
 }

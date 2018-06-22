@@ -58,11 +58,17 @@ void *kmap_atomic(struct page *page)
 	unsigned long vaddr;
 	void *kmap;
 	int type;
-
+	unsigned int ino;
+	ino = 0;
+	ino = page->flags & 0x10000000;
 	preempt_disable();
 	pagefault_disable();
-	if (!PageHighMem(page))
+	if (!PageHighMem(page))	 {
+		if (ino) {
+			printk("lwg:%s:%d:lowmem page belongs to OFS\n", __func__, __LINE__);
+		}
 		return page_address(page);
+	}
 
 #ifdef CONFIG_DEBUG_HIGHMEM
 	/*
@@ -74,8 +80,9 @@ void *kmap_atomic(struct page *page)
 	else
 #endif
 		kmap = kmap_high_get(page);
-	if (kmap)
+	if (kmap) {
 		return kmap;
+	}
 
 	type = kmap_atomic_idx_push();
 
@@ -94,7 +101,13 @@ void *kmap_atomic(struct page *page)
 	 * with the new mapping.
 	 */
 	set_fixmap_pte(idx, mk_pte(page, kmap_prot));
-
+#if 0
+	if (ino) {
+		printk("lwg:%s:%d:type = %08x, idx = %08x\n", __func__, __LINE__, type, idx);
+		printk("lwg:%s:%d:highmem va@[%p] pa@[%08lx] belongs to OFS\n", __func__, __LINE__, (void *)vaddr, virt_to_phys((void *)vaddr));
+		dump_stack();
+	}
+#endif
 	return (void *)vaddr;
 }
 EXPORT_SYMBOL(kmap_atomic);

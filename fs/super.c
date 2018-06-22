@@ -34,6 +34,10 @@
 #include <linux/fsnotify.h>
 #include <linux/lockdep.h>
 #include "internal.h"
+#include <linux/fs.h>
+#include <linux/buffer_head.h>
+
+#include "../drivers/block/loop.h" /* loop device */
 
 
 static LIST_HEAD(super_blocks);
@@ -968,6 +972,10 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 {
 	struct block_device *bdev;
 	struct super_block *s;
+	struct loop_device *lo;
+	struct file *ofs_f;
+	struct buffer_head *bh;
+	uint8_t *ofs_d;
 	fmode_t mode = FMODE_READ | FMODE_EXCL;
 	int error = 0;
 
@@ -1026,6 +1034,30 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 
 		s->s_flags |= MS_ACTIVE;
 		bdev->bd_super = s;
+	}
+
+	/* OFS use */
+	if (!strcmp(fs_type->name, "ext2")) {
+		printk("lwg:%s:%d:block size of loop is %d\n", __func__, __LINE__, block_size(bdev));
+		/* OFS needs to cpy all file into cma at mount tmie */
+		lo = (struct loop_device *)bdev->bd_disk->private_data;
+		if (lo) {
+			printk("lwg:%s:%d:found loop device...\n", __func__, __LINE__);
+			ofs_f = lo->lo_backing_file;
+			if (ofs_f) {
+				printk("lwg:%s:%d:found backing file\n", __func__, __LINE__);
+				printk("lwg:%s:%d:f_ops->read_iter = %p\n", __func__, __LINE__, ofs_f->f_op->read_iter);
+				printk("lwg:%s:%d:mapping->s_id = %s\n", __func__, __LINE__, ofs_f->f_mapping->host->i_sb->s_id );
+				printk("lwg:%s:%d:mapping->s_= %s\n", __func__, __LINE__, ofs_f->f_mapping->host->i_sb->s_id );
+				bh = sb_bread(s, 2);
+				ofs_d = bh->b_data;
+				printk("lwg:%s:%d:dump first few bytes of sector 2...\n", __func__, __LINE__);
+				printk("[0x%02x] [0x%02x] [0x%02x] [0x%02x]\n", *(ofs_d), *(ofs_d+ 1), *(ofs_d+ 2), *(ofs_d+ 3));
+				printk("lwg:%s:%d:size = %d...\n", __func__, __LINE__, bh->b_size);
+			}
+		} else {
+			printk("lwg: loop device not setup\n");
+		}
 	}
 
 	return dget(s->s_root);

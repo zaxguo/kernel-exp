@@ -8,6 +8,7 @@
 #include <linux/types.h>
 #include <linux/bug.h>
 #include <linux/mmdebug.h>
+//#include <linux/fs.h> // lwg: for debugging facility
 #ifndef __GENERATING_BOUNDS_H
 #include <linux/mm_types.h>
 #include <generated/bounds.h>
@@ -362,6 +363,9 @@ static inline void __SetPageUptodate(struct page *page)
 	__set_bit(PG_uptodate, &(page)->flags);
 }
 
+
+//#include <linux/fs.h>
+
 static inline void SetPageUptodate(struct page *page)
 {
 	/*
@@ -371,6 +375,7 @@ static inline void SetPageUptodate(struct page *page)
 	 */
 	smp_wmb();
 	set_bit(PG_uptodate, &(page)->flags);
+//	DUMP_STACK_LWG();
 }
 
 CLEARPAGEFLAG(Uptodate, uptodate)

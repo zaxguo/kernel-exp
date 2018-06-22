@@ -16,6 +16,70 @@
 #include <linux/kallsyms.h>
 #include <linux/utsname.h>
 #include <linux/mempolicy.h>
+// lwg:XXX:list
+#include <linux/mmc/host.h>
+#include <linux/rculist.h>
+#include <linux/gpio.h>
+#include <linux/cma.h>
+#include <linux/dma-contiguous.h>
+#include <linux/dma-mapping.h>
+#include <linux/device.h>
+#include "../../mm/cma.h"
+#include <linux/syscalls.h>
+#include <linux/file.h>
+#include <linux/fdtable.h>
+#include <linux/kthread.h> /* kthread_create */
+#include <linux/delay.h>
+
+#define PSB_CM_BASE 0x4A009700
+#define PSB_L4_CLK 0x0
+#define PSB_CLK_CTRL 0x68
+// lwg: GPIO BANK 3
+#define PSB_GPIO_BASE 0x48057000
+#define PSB_GPIO_SYSCONFIG 0x10
+#define PSB_GPIO_CTRL 0x130
+#define PSB_GPIO_OE 0x134
+#define PSB_GPIO_DATAIN 0x138
+#define PSB_GPIO_DATAOUT 0x13c
+#define PSB_GPIO_CLEAR 0x190
+#define PSB_GPIO_SET 0x194
+unsigned int *cm_per;
+unsigned int *gpio_base;
+static int bit = 0;
+
+
+
+static void init_gpio(int gpio) {
+	bit = gpio % 32;
+	cm_per = ioremap_nocache(PSB_CM_BASE, PAGE_SIZE);
+	gpio_base = ioremap_nocache(PSB_GPIO_BASE, PAGE_SIZE);
+	*(unsigned int *)((u32)cm_per) &= ~(0x3);  // enable GDBCLK
+	*(unsigned int *)((u32)cm_per + PSB_CLK_CTRL) &= ~(0x3 << 16);
+	wmb();
+	/* SYSCONFIG reset */
+	*(unsigned int *)((u32)gpio_base + 0x10) |= (0x1 << 1);	 // interface clock free running
+	/* IDLE MODE */
+	*(unsigned int *)((u32)gpio_base + 0x10) |= (0x1 << 3);	 // interface clock free running
+	/* Interface clock gating */
+	*(unsigned int *)((u32)gpio_base + 0x10) &= ~(0x1);	 // interface clock free running
+	/* GPIO clock control*/
+	*(unsigned int *)((u32)gpio_base + PSB_GPIO_CTRL) &= ~(0x1);	 // interface clock free running
+	*(unsigned int *)((u32)gpio_base + PSB_GPIO_OE) &= ~(1 << bit);
+	return;
+}
+
+inline void off_gpio(void) {
+	*(unsigned int *)((u32)gpio_base + PSB_GPIO_CLEAR) |= (1 << bit);
+	wmb();
+	return;
+}
+
+inline void on_gpio(void) {
+	*(unsigned int *)((u32)gpio_base + PSB_GPIO_DATAOUT) |= (1 << bit);
+	wmb();
+	return;
+}
+
 
 #include "sched.h"
 
@@ -479,6 +543,353 @@ static int sched_debug_open(struct inode *inode, struct file *filp)
 	return ret;
 }
 
+// lwg: PSB procfs
+#define MAX_PROC_SIZE 100
+static char proc_data[MAX_PROC_SIZE];
+extern int psb_pid;
+extern struct task_group *psb_group;
+int psb_manager = -1;
+int psb_can_start = 0;
+struct task_group *sched_create_group(struct task_group *parent);
+extern unsigned cma_area_count;
+extern struct cma cma_areas[8];
+
+static int dump_psb_task_stat(struct task_struct *tsk, struct seq_file *file)
+{
+	struct sched_entity *se = &tsk->se;
+	SEQ_printf(file,"tsk->comm = %s\n", tsk->comm);
+	SEQ_printf(file,"tsk->pid  = %d\n", (int)tsk->pid);
+	SEQ_printf(file,"tsk->task_group = %p\n", tsk->sched_task_group);
+	SEQ_printf(file,"tsk->se   = %p\n", se);
+	SEQ_printf(file,"se->cfs_rq = %p\n", se->cfs_rq);
+}
+
+static int dump_psb_group_stat(struct seq_file *file)
+{
+	SEQ_printf(file, "-----------------DUMP PSB GROUP-------------\n");
+	int i;
+	struct cfs_rq *cfs_rq;
+	struct sched_entity *se;
+	for_each_possible_cpu(i) {
+		se	= psb_group->se[i];
+		cfs_rq = psb_group->cfs_rq[i];
+		SEQ_printf(file, "-----------------CPU %d-------------\n", i);
+		SEQ_printf(file, "rq->cfs @ %p\n", &cpu_rq(i)->cfs);
+		SEQ_printf(file, "se:[%d] @ %p\n", i, se);
+		SEQ_printf(file, "cfs_rq:[%d] @ %p\n", i, cfs_rq);
+		SEQ_printf(file, "cfs_rq:[%d] has %d runnable task\n", i, cfs_rq->nr_running);
+//		print_cfs_rq(file, i, cfs_rq);
+		print_cfs_group_stats(file, i, psb_group);
+	}
+	SEQ_printf(file, "-----------------DUMP PSB GROUP-------------\n");
+	return 0;
+}
+
+static int sched_psb_show(struct seq_file *file, void *v) {
+	void *vaddr;
+	unsigned long pfn;
+	struct page *page;
+	dma_addr_t dma_addr;
+	uint8_t *byte;
+	int i = 0;
+	printk("lwg:%s:%d:cma_area_count = %d\n", __func__, __LINE__, cma_area_count);
+	for (i = 0; i < cma_area_count; i++) {
+		printk("cma[%d]:base_pfn=[%08lx]\n", i, cma_areas[i].base_pfn);
+	}
+	printk("dump stats of cma ----\n");
+	vaddr = (void *)dma_alloc_from_contiguous(NULL, 1024, 8);
+	page = (struct page *)vaddr;
+	pfn = page_to_pfn(page);
+//	vaddr =  dma_alloc_coherent(NULL, 1024 * 4096, &dma_addr, GFP_KERNEL);
+	if (!vaddr) {
+		printk("failed to allocate CMA\n");
+		return 0;
+	}
+	printk("vaddr = [%p], pfn = [%lx], pa = [%lx]\n", vaddr, page_to_pfn(page), page_to_phys(page));
+	printk("[%p] isHighmem = %d\n", vaddr, PageHighMem((struct page*)vaddr));
+	vaddr = kmap_atomic(page);
+	byte = (uint8_t *)vaddr;
+	for (i = 0; i < 8; ++i) {
+		*(byte + i) = i;
+		printk("[0x%02x] ", *(byte + i));
+	}
+	printk("\n");
+	printk("dump pfn --- \n");
+	vaddr = ioremap(__pfn_to_phys(pfn), PAGE_SIZE);
+	if (!vaddr) {
+		printk("ioremap XXX\n");
+		return 0;
+	}
+	for (i = 0; i < 8; ++i) {
+		printk("[0x%02x] ", *(uint8_t *)(vaddr + i));
+	}
+	printk("\n");
+	printk("pfn + 1024 = [%lx]\n", pfn + 1023);
+	page = pfn_to_page(pfn + 1023);
+	vaddr = kmap_atomic(page);
+	printk("new page @ [%p]\n", (void *) page);
+	byte = (uint8_t *)vaddr;
+
+	for (i = 0; i < 8; ++i) {
+		printk("[0x%02x] ", *(byte + i));
+	}
+
+
+
+
+	return 0;
+}
+
+static int sched_psb_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+{
+	struct task_struct *psb, *psb_child;
+	struct pid *target_pid;
+	int i;
+	if (count > MAX_PROC_SIZE) {
+		count = MAX_PROC_SIZE;
+	}
+	if (copy_from_user(proc_data, buf, count)) {
+		return -EFAULT;
+	}
+//	return count;
+	sscanf(proc_data, "%d", &psb_pid);
+	printk("lwg:%s:PSB pid set to %d\n", __func__, psb_pid);
+#if 1
+	init_gpio(74);
+//	on_gpio();
+#endif
+	trace_printk("lwg:measurement begins.\n");
+	/* lwg: after get_task_struct, it'll always be safe to access that memory
+	 * until released by put_task_struct
+	 * Note the code below is protected by rcu
+	 */
+//  rcu_read_lock();
+//	psb = find_task_by_vpid((pid_t)psb_pid);
+//	get_task_struct(psb);
+//	rcu_read_unlock();
+	target_pid = find_get_pid((pid_t)psb_pid);
+	psb = get_pid_task(target_pid, PIDTYPE_PID);
+	if (!psb_group) {
+		psb_group = sched_create_group(&root_task_group);
+		sched_online_group(psb_group, &root_task_group);
+		psb_manager = 0;
+		printk(KERN_ERR"lwg:Power sandbox created, manager CPU %d\n", psb_manager);
+	}
+	if (!psb) {
+		return -ESRCH;
+	}
+//	preempt_disable();
+	if (!task_is_single_threaded(psb)) {
+		psb_can_start = 0;
+	// lwg: protected by RCU
+//		psb->flags |= PF_PSB;
+//		sched_move_task(psb);
+//		dump_psb_task_stat(psb, NULL);
+		for_each_thread(psb, psb_child) {
+			if ((int)psb_child->pid != psb_pid)
+				continue;
+			get_task_struct(psb_child);
+			psb_child->flags |= PF_PSB;
+			printk("lwg:%s:setting child thread %d PSB flag\n", __func__, (int)psb_child->pid);
+			sched_move_task(psb_child);
+			dump_psb_task_stat(psb_child, NULL);
+			put_task_struct(psb_child);
+		}
+	} else {
+		psb_can_start = 0;
+		struct list_head *list;
+		psb->flags |= PF_PSB;
+		dump_psb_task_stat(psb, NULL);
+		sched_move_task(psb);
+		list_for_each(list, &psb->children) {
+			psb_child = list_entry(list, struct task_struct, sibling);
+			if (psb_child) {
+				psb_child->flags |= PF_PSB;
+				printk("lwg:%s:setting child process %d PSB flag on CPU %d\n",
+						__func__,
+						(int)psb_child->pid,
+						psb_child->on_cpu);
+				sched_move_task(psb_child);
+			}
+		}
+	}
+	put_task_struct(psb);
+	smp_wmb();
+	dump_psb_group_stat(NULL);
+	printk("lwg:Power Sandbox up and running...\n");
+	psb_can_start = 1;
+//	preempt_enable();
+	resched_cpu(!psb_manager);
+	return count;
+}
+
+static int sched_psb_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, sched_psb_show, NULL);
+}
+
+int test_fd = -1;
+
+static struct task_struct *handler_task;
+
+struct files_struct ofs_files = {
+	.count		= ATOMIC_INIT(1),
+	.fdt		= &ofs_files.fdtab,
+	.fdtab		= {
+		.max_fds	= NR_OPEN_DEFAULT,
+		.fd		= &ofs_files.fd_array[0],
+		.close_on_exec	= ofs_files.close_on_exec_init,
+		.open_fds	= ofs_files.open_fds_init,
+		.full_fds_bits	= ofs_files.full_fds_bits_init,
+	},
+	.file_lock	= __SPIN_LOCK_UNLOCKED(ofs_files.file_lock),
+};
+
+
+/* package this as a thread */
+int lwg_test(void *data) {
+	char buf[20];
+	int count;
+	int fd;
+	struct fd fd_f;
+	struct file *f;
+	printk("lwg:%s:%d:enter\n", __func__, __LINE__);
+//	f = filp_open("/mnt/ext2/test.txt", O_RDWR, 0); /* works */
+	fd = sys_open("/mnt/ext2/test.txt", O_RDWR, 0);
+	fd_f = fdget(fd);
+	f = fd_f.file;
+	printk("lwg:%s:%d:fd = %d\n", __func__, __LINE__, fd);
+	if (f) {
+		struct file *filp = f;
+		printk("lwg:%s:%d:has file, try kernel read\n", __func__, __LINE__);
+		count = kernel_read(filp, 0, buf, 15); /* works */
+		buf[count] = '\0';
+		if (count) {
+			printk("lwg:reading [%s]\n",buf);
+			test_fd = fd;
+			__fd_install(&ofs_files, fd, filp);
+		}
+#if 0
+		for(;;) {
+			msleep(100);
+		}
+#endif
+	}
+	return 0;
+}
+
+extern struct mmc_host *lwg_mmc;
+int mmc_suspend(struct mmc_host *host);
+int lwg_test_mmc(void *data) {
+	trace_printk("lwg:%s:%d:begins.\n", __func__, __LINE__);
+	mmc_suspend(lwg_mmc);
+	trace_printk("lwg:%s:%d:ends.\n", __func__, __LINE__);
+	return 0;
+}
+
+static void lwg_test_wrapper(void) {
+	/* create kthread */
+	if (test_fd != -1) {
+		struct fd fd;
+		struct file *f;
+		fd = fdget(test_fd);
+		f = fd.file;
+		printk("lwg:%s:%d:existing FD ...\n", __func__, __LINE__);
+		if (f) {
+			char buf[20];
+			printk("lwg:%s:%d:opening existing file [%p]...\n", __func__, __LINE__, (void *)f);
+			kernel_read(f, 0, buf, 15);
+			buf[15] = '\0';
+			printk("%s\n", buf);
+		}
+	} else {
+		struct task_struct *tsk;
+		struct files_struct *files;
+		struct fdtable *fdtable;
+		unsigned long openfd;
+		tsk = kthread_run(lwg_test, NULL, "lwg_test");
+#if 0
+		handler_task = tsk;
+		printk("tsk = [%p]\n", (void *)tsk);
+		files = tsk->files;
+		fdtable = files->fdt;
+		openfd = *(fdtable->open_fds);
+		printk("openend... [%lu] == [%p]\n", openfd, (void *)(fdtable->fd));
+#endif
+	}
+	return;
+}
+
+
+static void dump_task_fds(struct task_struct *tsk) {
+		struct files_struct *files;
+		struct fdtable *fdtable;
+		unsigned long openfd;
+		printk("tsk = [%p]\n", (void *)tsk);
+		if (!tsk) {
+			printk("XXX tsk non existent\n");
+			return;
+		}
+		files = get_files_struct(tsk);
+//		files = tsk->files;
+		fdtable = files->fdt;
+		openfd = *(fdtable->open_fds);
+		printk("lwg:%s:%d:openend... [%lu] == [%p]\n", __func__, __LINE__, openfd, (void *)(fdtable->fd));
+}
+
+static void test_ofs_fds(unsigned long fd) {
+	struct file *f;
+	char buf[20];
+	int len;
+	f = fcheck_files(&ofs_files, fd);
+	if (!f) {
+		printk("lwg:%s:%d:no files in ofs fd\n", __func__, __LINE__);
+	}
+	len = kernel_read(f, 0, buf, 15);
+	buf[len] = '\0';
+	printk("lwg:%s:%d:[%s]\n", __func__, __LINE__, buf);
+}
+
+static int lwg_test_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) {
+	int test_case, rc;
+	struct task_struct *tsk;
+	char buffer[100];
+	if (copy_from_user(buffer, buf, count)) {
+		return -EFAULT;
+	}
+	rc = sscanf(buffer, "%d", &test_case);
+	printk("lwg:%s:%d:test case = %d\n", __func__, __LINE__, test_case);
+	switch (test_case) {
+	case 0:
+		lwg_test_wrapper();
+		break;
+	case 1:
+		tsk = handler_task;
+		dump_task_fds(tsk);
+		test_ofs_fds(test_fd);
+		break;
+	case 2:
+		lwg_test_mmc();
+		break;
+	default:
+		break;
+	}
+	return count;
+}
+
+static const struct file_operations	lwg_test_fops= {
+		.read = seq_read,
+		.write = lwg_test_write,
+//		.release = single_release, /* no need to single_release unless single_opened */
+};
+
+static const struct file_operations	sched_psb_fops = {
+		.open = sched_psb_open,
+		.read = seq_read,
+		.write = sched_psb_write,
+		.release = single_release,
+};
+
 static const struct file_operations sched_debug_fops = {
 	.open		= sched_debug_open,
 	.read		= seq_read,
@@ -489,9 +900,14 @@ static const struct file_operations sched_debug_fops = {
 static int __init init_sched_debug_procfs(void)
 {
 	struct proc_dir_entry *pe;
+	struct proc_dir_entry *psb_proc_write_entry;
+	struct proc_dir_entry *lwg_test_proc;
 
 	pe = proc_create("sched_debug", 0444, NULL, &sched_debug_fops);
-	if (!pe)
+	psb_proc_write_entry = proc_create("sched_psb", 0666, NULL, &sched_psb_fops);
+	lwg_test_proc = proc_create("lwg_test", 0666, NULL, &lwg_test_fops);
+
+	if (!pe || !psb_proc_write_entry)
 		return -ENOMEM;
 	return 0;
 }

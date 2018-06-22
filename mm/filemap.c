@@ -1042,8 +1042,10 @@ struct page *find_get_entry(struct address_space *mapping, pgoff_t offset)
 	rcu_read_lock();
 repeat:
 	page = NULL;
+	/* lwg: this gives you a pointer to the slot in the tree */
 	pagep = radix_tree_lookup_slot(&mapping->page_tree, offset);
 	if (pagep) {
+		/* lwg: then you need to deref it */
 		page = radix_tree_deref_slot(pagep);
 		if (unlikely(!page))
 			goto out;
@@ -1140,7 +1142,8 @@ struct page *pagecache_get_page(struct address_space *mapping, pgoff_t offset,
 	int fgp_flags, gfp_t gfp_mask)
 {
 	struct page *page;
-
+	unsigned long ino = mapping->host->i_ino;
+	int is_new = 0;
 repeat:
 	page = find_get_entry(mapping, offset);
 	if (radix_tree_exceptional_entry(page))
@@ -1181,7 +1184,13 @@ no_page:
 		page = __page_cache_alloc(gfp_mask);
 		if (!page)
 			return NULL;
-
+		if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
+			is_new = 1;
+			printk("lwg:%s:alloc page %p for %lu on %s\n", __func__,
+					page, ino, mapping->host->i_sb->s_id);
+			/* lwg: address_space is per-inode, each address_space has a different page_tree */
+			printk("lwg:%s:%lu:adding page [%p] to radix tree [%p]\n", __func__, ino, page, &mapping->page_tree);
+		}
 		if (WARN_ON_ONCE(!(fgp_flags & FGP_LOCK)))
 			fgp_flags |= FGP_LOCK;
 
@@ -1194,11 +1203,30 @@ no_page:
 		if (unlikely(err)) {
 			page_cache_release(page);
 			page = NULL;
-			if (err == -EEXIST)
+			if (err == -EEXIST) {
+				trace_printk("lwg:%s:err = EEXIST, goto repeat\n", __func__);
 				goto repeat;
+			}
 		}
 	}
+//	DUMP_CONTENT_LWG(mapping->host->i_ino);
+	if (!strcmp(current->comm, TEST_COMM)) {
+		printk("lwg:%s:get page [%p] for [%lu]\n", __func__, page, ino);
+		if (ino == 2) {
+			dump_stack();
+		}
+	}
+	if ((!page) && ino != 0) {
+//		printk("lwg:%s:%lu on bdev %s doesn't have a page cache!\n", __func__, ino, mapping->host->i_sb->s_id);
+	} else if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
+		if (!is_new) /* lwg: indicating the page is found in exisiting page cache */
+			printk("lwg:%s:%d:get page %p for %lu on %s\n", __func__, __LINE__, page, ino, mapping->host->i_sb->s_id);
+#if 0
+		if (mapping->host->i_ino == 12)
+			dump_stack();
+#endif
 
+	}
 	return page;
 }
 EXPORT_SYMBOL(pagecache_get_page);
@@ -1544,12 +1572,16 @@ static ssize_t do_generic_file_read(struct file *filp, loff_t *ppos,
 	unsigned long offset;      /* offset into pagecache page */
 	unsigned int prev_offset;
 	int error = 0;
+	int is_osf = 0;
 
 	index = *ppos >> PAGE_CACHE_SHIFT;
 	prev_index = ra->prev_pos >> PAGE_CACHE_SHIFT;
 	prev_offset = ra->prev_pos & (PAGE_CACHE_SIZE-1);
 	last_index = (*ppos + iter->count + PAGE_CACHE_SIZE-1) >> PAGE_CACHE_SHIFT;
 	offset = *ppos & ~PAGE_CACHE_MASK;
+
+
+
 
 	for (;;) {
 		struct page *page;
@@ -1767,6 +1799,7 @@ generic_file_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	loff_t *ppos = &iocb->ki_pos;
 	loff_t pos = *ppos;
 
+//	DUMP_STACK_LWG();
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		struct address_space *mapping = file->f_mapping;
 		struct inode *inode = mapping->host;
@@ -1937,6 +1970,10 @@ static void do_async_mmap_readahead(struct vm_area_struct *vma,
  */
 int filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
+	/* lwg:XXX: to observe the behavior of file map */
+	if (!strcmp(current->comm, "a.out")) {
+//		dump_stack();
+	}
 	int error;
 	struct file *file = vma->vm_file;
 	struct address_space *mapping = file->f_mapping;
@@ -2056,6 +2093,9 @@ page_not_uptodate:
 }
 EXPORT_SYMBOL(filemap_fault);
 
+
+/* lwg: proof of mmap reuses page cache. It takes VMA and the mapping in file struct
+ * which iterates through the page tree specified in &mapping->page_tree */
 void filemap_map_pages(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
 	struct radix_tree_iter iter;
@@ -2114,6 +2154,13 @@ repeat:
 			file->f_ra.mmap_miss--;
 		addr = address + (page->index - vmf->pgoff) * PAGE_SIZE;
 		do_set_pte(vma, addr, page, pte, false, false);
+		/* lwg: dumping which page is mapped to where */
+#if 0
+		if (!strcmp(current->comm, TEST_COMM)) {
+			printk("lwg:%s:page %p -> addr %08x\n", __func__, page, addr);
+		}
+#endif
+
 		unlock_page(page);
 		goto next;
 unlock:
@@ -2165,6 +2212,10 @@ const struct vm_operations_struct generic_file_vm_ops = {
 
 int generic_file_mmap(struct file * file, struct vm_area_struct * vma)
 {
+	DUMP_STACK_LWG();
+	if (!strcmp(current->comm, TEST_COMM)) {
+//		dump_stack();
+	}
 	struct address_space *mapping = file->f_mapping;
 
 	if (!mapping->a_ops->readpage)
@@ -2217,6 +2268,7 @@ static struct page *__read_cache_page(struct address_space *mapping,
 {
 	struct page *page;
 	int err;
+	unsigned long ino = mapping->host->i_ino;
 repeat:
 	page = find_get_page(mapping, index);
 	if (!page) {
@@ -2232,6 +2284,13 @@ repeat:
 			return ERR_PTR(err);
 		}
 		err = filler(data, page);
+		if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
+			trace_printk("lwg:%s:alloc page %p for %lu on %s\n", __func__,
+					page, ino, mapping->host->i_sb->s_id);
+			trace_printk("lwg:%s:using %pf to fill new page %p of %lu\n", __func__,
+					filler, page, ino);
+		}
+
 		if (err < 0) {
 			page_cache_release(page);
 			page = ERR_PTR(err);
@@ -2488,6 +2547,7 @@ struct page *grab_cache_page_write_begin(struct address_space *mapping,
 	if (page)
 		wait_for_stable_page(page);
 
+
 	return page;
 }
 EXPORT_SYMBOL(grab_cache_page_write_begin);
@@ -2538,7 +2598,12 @@ again:
 			status = -EINTR;
 			break;
 		}
-
+		/* lwg: ext2_write_begin ==> grab_pagecache_write_begin, block_write_begin
+		 * ==> __block_write_begin
+		 * These are buffered writes, even if the pagecache doesn't exist, it'll
+		 * alloc a slot in the page cahce
+		 * More about write see buffer.c */
+		/* lwg: will handle block alloc pay attention! s*/
 		status = a_ops->write_begin(file, mapping, pos, bytes, flags,
 						&page, &fsdata);
 		if (unlikely(status < 0))
@@ -2548,8 +2613,28 @@ again:
 			flush_dcache_page(page);
 
 		copied = iov_iter_copy_from_user_atomic(page, i, offset, bytes);
+		/* lwg: this makes sure the data in dcache is up-to-date */
 		flush_dcache_page(page);
 
+
+		/* lwg: let's see if the system can really keep track of which data page it
+		 * used */
+
+		if (page->flags & 0x10000000) {
+			int i;
+			char *kaddr;
+			printk("lwg:%s:%d:page@[%p]\n", __func__, __LINE__, (void *)page);
+#if 0
+			kaddr = kmap_atomic(page);
+			for(i = offset; i < offset + copied ; i++ ) {
+				printk("lwg:%s:%d:[%c]\n", __func__, __LINE__, *(kaddr + i));
+			}
+#endif
+		}
+
+		/* lwg: this will simply flush dcache_page and then commit writes
+		 * by setting DIRTY bit, not committing
+		 * IO request to block layer! */
 		status = a_ops->write_end(file, mapping, pos, bytes, copied,
 						page, fsdata);
 		if (unlikely(status < 0))
@@ -2578,6 +2663,7 @@ again:
 		balance_dirty_pages_ratelimited(mapping);
 	} while (iov_iter_count(i));
 
+//	DUMP_STACK_LWG();
 	return written ? written : status;
 }
 EXPORT_SYMBOL(generic_perform_write);
@@ -2620,7 +2706,7 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 
 	if (iocb->ki_flags & IOCB_DIRECT) {
 		loff_t pos, endbyte;
-
+		FUNCTION_PROBE_LWG();
 		written = generic_file_direct_write(iocb, from, iocb->ki_pos);
 		/*
 		 * If the write stopped short of completing, fall back to
@@ -2664,6 +2750,8 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 			 */
 		}
 	} else {
+		/* lwg: for a write() it simply goes here */
+//		FUNCTION_PROBE_LWG();
 		written = generic_perform_write(file, from, iocb->ki_pos);
 		if (likely(written > 0))
 			iocb->ki_pos += written;
@@ -2688,16 +2776,18 @@ ssize_t generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	struct file *file = iocb->ki_filp;
 	struct inode *inode = file->f_mapping->host;
 	ssize_t ret;
+//  lwg: not used
+//	DUMP_STACK_LWG();
 
 	mutex_lock(&inode->i_mutex);
 	ret = generic_write_checks(iocb, from);
 	if (ret > 0)
 		ret = __generic_file_write_iter(iocb, from);
 	mutex_unlock(&inode->i_mutex);
-
+	/* lwg: After each generic write (i.e. write to memory page), it'll call sync */
 	if (ret > 0) {
 		ssize_t err;
-
+//		FUNCTION_PROBE_LWG();
 		err = generic_write_sync(file, iocb->ki_pos - ret, ret);
 		if (err < 0)
 			ret = err;

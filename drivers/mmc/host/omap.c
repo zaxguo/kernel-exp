@@ -1323,6 +1323,8 @@ static int mmc_omap_probe(struct platform_device *pdev)
 	int i, ret = 0;
 	int irq;
 
+	printk("lwg:------------HELLO-----------\n");
+	printk("lwg:%s:entered, %s probed\n", __func__, &(pdata->dev)->init_name);
 	if (pdata == NULL) {
 		dev_err(&pdev->dev, "platform data missing\n");
 		return -ENXIO;

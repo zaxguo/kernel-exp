@@ -603,6 +603,13 @@ EXPORT_SYMBOL(single_open_size);
 
 int single_release(struct inode *inode, struct file *file)
 {
+	struct seq_file *tmp;
+	tmp = (struct seq_file *)file->private_data;
+	if (!tmp) {
+		/* I felt this is a Linux Bug lol */
+		printk("XXXXXX bug, ino = %lu\n", inode->i_ino);
+		return 0;
+	}
 	const struct seq_operations *op = ((struct seq_file *)file->private_data)->op;
 	int res = seq_release(inode, file);
 	kfree(op);

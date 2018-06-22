@@ -339,10 +339,25 @@ static int lo_read_simple(struct loop_device *lo, struct request *rq,
 	struct req_iterator iter;
 	struct iov_iter i;
 	ssize_t len;
+	uint8_t *byte;
+	int j;
 
 	rq_for_each_segment(bvec, rq, iter) {
 		iov_iter_bvec(&i, ITER_BVEC, &bvec, 1, bvec.bv_len);
-		len = vfs_iter_read(lo->lo_backing_file, &i, &pos);
+//		len = copy_to_iter();
+		printk("lwg:%s:%d:copying sector [%08llx] to iterator, size = [%d]\n", __func__, __LINE__, blk_rq_pos(rq), bvec.bv_len);
+		len = vfs_iter_read(lo->lo_backing_file, &i, &pos); /* lwg: intercept this */
+#if 0
+		if (blk_rq_pos(rq) == 0x128)  {
+			byte = kmap_atomic(bvec.bv_page);
+			for (j = 0; j < 8; j++) {
+				printk("[%02x] ", *(byte + j));
+			}
+			printk("\n");
+		}
+#endif
+
+
 		if (len < 0)
 			return len;
 
@@ -540,6 +555,7 @@ static int do_req_filebacked(struct loop_device *lo, struct request *rq)
 	int ret;
 
 	pos = ((loff_t) blk_rq_pos(rq) << 9) + lo->lo_offset;
+	printk("lwg:%s:%d: file_pos = [%08llx], sec = [%08llx], size = [%d]\n", __func__, __LINE__, pos, blk_rq_pos(rq), rq->__data_len);
 
 	if (rq->cmd_flags & REQ_WRITE) {
 		if (rq->cmd_flags & REQ_FLUSH)
@@ -552,11 +568,26 @@ static int do_req_filebacked(struct loop_device *lo, struct request *rq)
 			ret = lo_rw_simple(lo, rq, pos, WRITE);
 
 	} else {
-		if (lo->transfer)
+		if (lo->transfer) {
+			if (!strcmp(lo->lo_backing_file->f_path.dentry->d_name.name, "new_image.ext2")) {
+				printk("read_transfer\n");
+			}
 			ret = lo_read_transfer(lo, rq, pos);
-		else
+		}
+		else {
+			if (!strcmp(lo->lo_backing_file->f_path.dentry->d_name.name, "new_image.ext2")) {
+				printk("rw_simple, pos = [%llx]\n", rq->__sector);
+#if 0
+				/* driven by kernel worker thread*/
+				if (rq->__sector == 0x2) {
+						dump_stack();
+				}
+#endif
+			}
 			ret = lo_rw_simple(lo, rq, pos, READ);
+		}
 	}
+
 
 	return ret;
 }

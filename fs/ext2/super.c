@@ -1140,6 +1140,12 @@ static int ext2_fill_super(struct super_block *sb, void *data, int silent)
 	if (ext2_setup_super (sb, es, sb->s_flags & MS_RDONLY))
 		sb->s_flags |= MS_RDONLY;
 	ext2_write_super(sb);
+
+	/* dump super block info */
+	printk("block count = %08x, block size = %08lx\n", es->s_blocks_count, sb->s_blocksize);
+
+
+
 	return 0;
 
 cantfind_ext2:
@@ -1436,6 +1442,7 @@ static int ext2_statfs (struct dentry * dentry, struct kstatfs * buf)
 static struct dentry *ext2_mount(struct file_system_type *fs_type,
 	int flags, const char *dev_name, void *data)
 {
+//	dump_stack();
 	return mount_bdev(fs_type, flags, dev_name, data, ext2_fill_super);
 }
 

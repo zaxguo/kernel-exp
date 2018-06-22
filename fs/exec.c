@@ -1476,6 +1476,9 @@ int search_binary_handler(struct linux_binprm *bprm)
 }
 EXPORT_SYMBOL(search_binary_handler);
 
+extern void sched_move_task(struct task_struct *p);
+extern int psb_can_start;
+extern int psb_pid;
 static int exec_binprm(struct linux_binprm *bprm)
 {
 	pid_t old_pid, old_vpid;
@@ -1493,6 +1496,15 @@ static int exec_binprm(struct linux_binprm *bprm)
 		trace_sched_process_exec(current, old_pid, bprm);
 		ptrace_event(PTRACE_EVENT_EXEC, old_vpid);
 		proc_exec_connector(current);
+#if 0 /* lwg: we mark calib3d as psb process at the beginning */
+		if(!strcmp(current->comm, "opencv_test_cal")) {
+			current->flags |= PF_PSB;
+			psb_pid = (int)current->pid;
+			printk("lwg:%s:psb_pid set to %d\n", __func__, psb_pid);
+			sched_move_task(current);
+			psb_can_start = 1;
+		}
+#endif
 	}
 
 	return ret;

@@ -240,10 +240,11 @@ static Indirect *ext2_get_branch(struct inode *inode,
 
 	*err = 0;
 	/* i_data is not going away, no lock needed */
-	add_chain (chain, NULL, EXT2_I(inode)->i_data + *offsets);
+	add_chain(chain, NULL, EXT2_I(inode)->i_data + *offsets);
 	if (!p->key)
 		goto no_block;
 	while (--depth) {
+		/* lwg: read a specific block, returns bh */
 		bh = sb_bread(sb, le32_to_cpu(p->key));
 		if (!bh)
 			goto failure;
@@ -749,6 +750,7 @@ static int ext2_get_blocks(struct inode *inode,
 	mutex_unlock(&ei->truncate_mutex);
 	set_buffer_new(bh_result);
 got_it:
+	/* lwg: This is simply setting some values */
 	map_bh(bh_result, inode->i_sb, le32_to_cpu(chain[depth-1].key));
 	if (count > blocks_to_boundary)
 		set_buffer_boundary(bh_result);
@@ -762,16 +764,28 @@ cleanup:
 	}
 	return err;
 }
-
+/* lwg:credit:Nitin agrawal
+ * pg. 511, ext2_get_block() translates the block number relative to the file
+into a logical block number, which represents the position of the data on the
+physical block device */
 int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_result, int create)
 {
 	unsigned max_blocks = bh_result->b_size >> inode->i_blkbits;
+	sector_t block;
 	int ret = ext2_get_blocks(inode, iblock, max_blocks,
 			      bh_result, create);
 	if (ret > 0) {
 		bh_result->b_size = (ret << inode->i_blkbits);
 		ret = 0;
 	}
+	printk("lwg:%s:%d:map bh to block [%llx],size = [%d]\n", __func__, __LINE__, bh_result->b_blocknr, bh_result->b_size);
+	block = bh_result->b_blocknr;
+#if 0
+	/* page_size request from ext2_readpage which is from do_mpage_readpage */
+	if (block == 0x95 && (bh_result->b_size == 4096)) {
+		dump_stack();
+	}
+#endif
 	return ret;
 
 }
@@ -806,8 +820,10 @@ ext2_write_begin(struct file *file, struct address_space *mapping,
 		struct page **pagep, void **fsdata)
 {
 	int ret;
-
-	ret = block_write_begin(mapping, pos, len, flags, pagep,
+	/* lwg: Note the flag here is only used for page allocator */
+	unsigned ext2_flag = flags;
+	ext2_flag |= AOP_FLAG_OFS;
+	ret = block_write_begin(mapping, pos, len, ext2_flag, pagep,
 				ext2_get_block);
 	if (ret < 0)
 		ext2_write_failed(mapping, pos + len);
@@ -1245,6 +1261,7 @@ static struct ext2_inode *ext2_get_inode(struct super_block *sb, ino_t ino,
 	unsigned long block;
 	unsigned long offset;
 	struct ext2_group_desc * gdp;
+	int i;
 
 	*p = NULL;
 	if ((ino != EXT2_ROOT_INO && ino < EXT2_FIRST_INO(sb)) ||
@@ -1255,17 +1272,41 @@ static struct ext2_inode *ext2_get_inode(struct super_block *sb, ino_t ino,
 	gdp = ext2_get_group_desc(sb, block_group, NULL);
 	if (!gdp)
 		goto Egdp;
+
+	/* lwg: now we dump GDP */
+	printk_once("lwg:%s:GDP: block bitmap %08lx, inode bitmap %08lx, inode table %08lx\n", __func__,
+			(unsigned long)gdp->bg_block_bitmap,
+			(unsigned long)gdp->bg_inode_bitmap,
+			(unsigned long)gdp->bg_inode_table);
+
 	/*
 	 * Figure out the offset within the block group inode table
 	 */
 	offset = ((ino - 1) % EXT2_INODES_PER_GROUP(sb)) * EXT2_INODE_SIZE(sb);
 	block = le32_to_cpu(gdp->bg_inode_table) +
 		(offset >> EXT2_BLOCK_SIZE_BITS(sb));
+	/* lwg: by querying the inode table, we figure out the block mapping */
+	/* Inode table block */
 	if (!(bh = sb_bread(sb, block)))
 		goto Eio;
 
 	*p = bh;
 	offset &= (EXT2_BLOCK_SIZE(sb) - 1);
+//	trace_printk("lwg:%s:ino %ld queried from blk %08lx\n", __func__, ino, (unsigned long)block);
+#if 0
+	if (ino == 13) {
+		printk("lwg:%s:%d:caught magic ino [%ld], offset = [%lx], block = [%llx]\n", __func__, __LINE__, ino, offset, bh->b_blocknr);
+		printk("lwg:%s:%d:dump first 1KB---------\n", __func__, __LINE__);
+		uint8_t *base = (uint8_t *)bh->b_data + offset;
+		for (i = 0; i < 8; i++) {
+			printk("0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x 0x%02x\n",
+					base[0], base[1], base[2], base[3],
+					base[4], base[5], base[6], base[7]);
+			base += 8;
+		}
+//		dump_stack();
+	}
+#endif
 	return (struct ext2_inode *) (bh->b_data + offset);
 
 Einval:
@@ -1393,8 +1434,10 @@ struct inode *ext2_iget (struct super_block *sb, unsigned long ino)
 	 * NOTE! The in-memory inode i_data array is in little-endian order
 	 * even on big-endian machines: we do NOT byteswap the block numbers!
 	 */
-	for (n = 0; n < EXT2_N_BLOCKS; n++)
+	for (n = 0; n < EXT2_N_BLOCKS; n++) {
 		ei->i_data[n] = raw_inode->i_block[n];
+//		printk("lwg:%s:ino %lu points to block %08lx\n", __func__, ino, raw_inode->i_block[n]);
+	}
 
 	if (S_ISREG(inode->i_mode)) {
 		inode->i_op = &ext2_file_inode_operations;
@@ -1458,6 +1501,10 @@ static int __ext2_write_inode(struct inode *inode, int do_sync)
 
 	if (IS_ERR(raw_inode))
  		return -EIO;
+
+	/* lwg:start profiling write_inoe */
+	trace_printk("lwg:%s:start for %lu\n", __func__, (unsigned long)ino);
+
 
 	/* For fields not not tracking in the in-memory inode,
 	 * initialise them to zero for new inodes. */
@@ -1545,6 +1592,8 @@ static int __ext2_write_inode(struct inode *inode, int do_sync)
 		}
 	}
 	ei->i_state &= ~EXT2_STATE_NEW;
+	/* explicitly indicate write ends */
+	trace_printk("lwg:%s:finished for %lu to block %08lx\n", __func__, (unsigned long)ino, (unsigned long)bh->b_blocknr);
 	brelse (bh);
 	return err;
 }

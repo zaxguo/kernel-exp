@@ -220,7 +220,12 @@ static void __mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 			return;
 		}
 	}
-
+	/* lwg: card-specific request function */
+#if 0 /* not working */
+	if (host->ops->request) {
+		printk("lwg:%s: using %pf\n", __func__, host->ops->request);
+	}
+#endif
 	host->ops->request(host, mrq);
 }
 

@@ -48,9 +48,21 @@ static inline bool task_group_is_autogroup(struct task_group *tg)
 	return 0;
 }
 
+// lwg:intercept task group allocation
+extern int psb_pid;
+extern struct task_group *psb_group;
 static inline struct task_group *
 autogroup_task_group(struct task_struct *p, struct task_group *tg)
 {
+	if (p->flags & PF_PSB) {
+		BUG_ON(!psb_group);
+//		dump_stack();
+//		printk(KERN_ERR"lwg:%s:put %d into psb_group %p\n",
+	//			__func__,
+		//		(int)p->pid,
+			//	psb_group);
+		return psb_group;
+	}
 	return tg;
 }
 

@@ -445,8 +445,10 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 		return -EBADF;
 	if (!(file->f_mode & FMODE_CAN_READ))
 		return -EINVAL;
+#if 0
 	if (unlikely(!access_ok(VERIFY_WRITE, buf, count)))
 		return -EFAULT;
+#endif
 
 	ret = rw_verify_area(READ, file, pos, count);
 	if (ret >= 0) {
@@ -485,10 +487,23 @@ static ssize_t new_sync_write(struct file *filp, const char __user *buf, size_t 
 ssize_t __vfs_write(struct file *file, const char __user *p, size_t count,
 		    loff_t *pos)
 {
-	if (file->f_op->write)
+//	DUMP_STACK_LWG();
+	if (file->f_op->write) {
+		/* lwg: write to trace will call this which pollutes our console */
+#if 0
+		if (!strcmp(current->comm, "a.out")) {
+			printk("lwg:%s:using write @ %p\n",__func__, file->f_op->write);
+		}
+#endif
 		return file->f_op->write(file, p, count, pos);
-	else if (file->f_op->write_iter)
+	}
+	else if (file->f_op->write_iter) {
+		if (!strcmp(current->comm, "a.out")) {
+			printk("lwg:%s:using write_iter %pf\n",__func__, file->f_op->write_iter);
+//			dump_stack();
+		}
 		return new_sync_write(file, p, count, pos);
+	}
 	else
 		return -EINVAL;
 }

@@ -44,6 +44,9 @@
 #include <linux/bit_spinlock.h>
 #include <trace/events/block.h>
 
+
+
+
 static int fsync_buffers_list(spinlock_t *lock, struct list_head *list);
 static int submit_bh_wbc(int rw, struct buffer_head *bh,
 			 unsigned long bio_flags,
@@ -208,9 +211,20 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 	struct buffer_head *bh;
 	struct buffer_head *head;
 	struct page *page;
+	char *fs_name = bd_mapping->host->i_sb->s_type->name;
 	int all_mapped = 1;
+	int debug_ofs = 0;
 
+	/* lwg: convert block nr into page cache index
+	 * blocksize = 1K, page size = 4K,
+	 * index = blocknr/4 */
 	index = block >> (PAGE_CACHE_SHIFT - bd_inode->i_blkbits);
+	/* re-route to pagecache subsystem to get content */
+//	printk("lwg:%s:%d:%s\n", __func__, __LINE__, fs_name);
+//	if (!strcmp(bd_mapping->host->i_sb->s_type->name, "bdev")) {
+//		printk("lwg:%s:%d:block = [%llx], index = [%lx]\n", __func__, __LINE__, block, index);
+//		debug_ofs = 1;
+//	}
 	page = find_get_page_flags(bd_mapping, index, FGP_ACCESSED);
 	if (!page)
 		goto out;
@@ -223,13 +237,15 @@ __find_get_block_slow(struct block_device *bdev, sector_t block)
 	do {
 		if (!buffer_mapped(bh))
 			all_mapped = 0;
-		else if (bh->b_blocknr == block) {
+		else if (bh->b_blocknr == block) { /* lwg: find the mapped block in bh*/
 			ret = bh;
 			get_bh(bh);
 			goto out_unlock;
 		}
 		bh = bh->b_this_page;
 	} while (bh != head);
+
+
 
 	/* we might be here because some of the buffers on this page are
 	 * not mapped.  This is due to various races between
@@ -742,6 +758,7 @@ static int fsync_buffers_list(spinlock_t *lock, struct list_head *list)
 	spin_lock(lock);
 	while (!list_empty(list)) {
 		bh = BH_ENTRY(list->next);
+//		printk("lwg:%s:examing %lu buffer_block %08lx\n", __func__, mapping->host->i_ino, (unsigned long)bh->b_blocknr);
 		mapping = bh->b_assoc_map;
 		__remove_assoc_queue(bh);
 		/* Avoid race with mark_buffer_dirty_inode() which does
@@ -1106,7 +1123,7 @@ __getblk_slow(struct block_device *bdev, sector_t block,
 	for (;;) {
 		struct buffer_head *bh;
 		int ret;
-
+		/* this passes block request */
 		bh = __find_get_block(bdev, block, size);
 		if (bh)
 			return bh;
@@ -1120,6 +1137,7 @@ __getblk_slow(struct block_device *bdev, sector_t block,
 }
 EXPORT_SYMBOL(__getblk_slow);
 
+/* lwg: This is very informative */
 /*
  * The relationship between dirty buffers and dirty pages:
  *
@@ -1390,11 +1408,19 @@ struct buffer_head *
 __getblk_gfp(struct block_device *bdev, sector_t block,
 	     unsigned size, gfp_t gfp)
 {
+	/* lwg: this will perform once, if bh not found, goes to a while loop */
+	/* search among page cache */
 	struct buffer_head *bh = __find_get_block(bdev, block, size);
 
 	might_sleep();
-	if (bh == NULL)
+	if (bh == NULL) {
+		/* lwg: search for inf times in pg cache */
+		/* its never null... */
 		bh = __getblk_slow(bdev, block, size, gfp);
+//		printk("lwg:%s:%d: [%08llx] slow...\n", __func__, __LINE__, block);
+	}
+//	printk("lwg:%s:locate bh on %08lx in bdev sb %s\n", __func__, (unsigned long)bh->b_blocknr, bdev->bd_super->s_id);
+
 	return bh;
 }
 EXPORT_SYMBOL(__getblk_gfp);
@@ -1428,10 +1454,18 @@ struct buffer_head *
 __bread_gfp(struct block_device *bdev, sector_t block,
 		   unsigned size, gfp_t gfp)
 {
+	/* lwg: critical function of block read/write */
+	/* this search among the page cache, if not allocate buffer head
+	 * for the page*/
 	struct buffer_head *bh = __getblk_gfp(bdev, block, size, gfp);
 
-	if (likely(bh) && !buffer_uptodate(bh))
+	/* the buffer_head has been allocated, but not mapped (i.e., !uptodate)
+	 * Now read the buffer by submitting bio... */
+	if (likely(bh) && !buffer_uptodate(bh)) {
+//		printk("lwg:%s:%d:[%08llx]\n", __func__, __LINE__,  bh->b_blocknr);
 		bh = __bread_slow(bh);
+//		printk("lwg:%s:%d:[%08llx]\n", __func__, __LINE__,  bh->b_blocknr);
+	}
 	return bh;
 }
 EXPORT_SYMBOL(__bread_gfp);
@@ -1612,6 +1646,8 @@ void create_empty_buffers(struct page *page,
 	}
 	attach_page_buffers(page, head);
 	spin_unlock(&page->mapping->private_lock);
+	/* lwg: won't be triggered */
+	// DUMP_STACK_LWG();
 }
 EXPORT_SYMBOL(create_empty_buffers);
 
@@ -1660,12 +1696,20 @@ static inline int block_size_bits(unsigned int blocksize)
 	return ilog2(blocksize);
 }
 
+/* lwg: this name is kind of misleading because if the page already has buffers
+ * it won't create buffers */
 static struct buffer_head *create_page_buffers(struct page *page, struct inode *inode, unsigned int b_state)
 {
+	/* lwg:not used in single file read */
+//	DUMP_STACK_LWG();
 	BUG_ON(!PageLocked(page));
 
-	if (!page_has_buffers(page))
+	if (!page_has_buffers(page)) {
+		if (!strcmp(current->comm, TEST_COMM)) {
+			printk("lwg:%s:doens't have page buffers, create\n", __func__);
+		}
 		create_empty_buffers(page, 1 << ACCESS_ONCE(inode->i_blkbits), b_state);
+	}
 	return page_buffers(page);
 }
 
@@ -1919,15 +1963,20 @@ int __block_write_begin(struct page *page, loff_t pos, unsigned len,
 	BUG_ON(to > PAGE_CACHE_SIZE);
 	BUG_ON(from > to);
 
+//	printk("lwg:%s:start for %lu\n", __func__, inode->i_ino);
+
 	head = create_page_buffers(page, inode, 0);
 	blocksize = head->b_size;
 	bbits = block_size_bits(blocksize);
 
 	block = (sector_t)page->index << (PAGE_CACHE_SHIFT - bbits);
-
+//	printk("lwg:%s:%lu starting from block %08lx within the file\n", __func__, inode->i_ino, (unsigned long)block);
+	/* lwg: iterate through the BH until reaches the head, i.e.
+	 * bh == head */
 	for(bh = head, block_start = 0; bh != head || !block_start;
 	    block++, block_start=block_end, bh = bh->b_this_page) {
 		block_end = block_start + blocksize;
+		/* lwg: if the block to be written sits inside the range*/
 		if (block_end <= from || block_start >= to) {
 			if (PageUptodate(page)) {
 				if (!buffer_uptodate(bh))
@@ -1937,9 +1986,17 @@ int __block_write_begin(struct page *page, loff_t pos, unsigned len,
 		}
 		if (buffer_new(bh))
 			clear_buffer_new(bh);
+		/* lwg:test mapped bit, note the function is emitted */
 		if (!buffer_mapped(bh)) {
 			WARN_ON(bh->b_size != blocksize);
 			err = get_block(inode, block, bh, 1);
+//			printk("lwg:%s:%lu mapped to block %08lx with offset %08lx within the file\n",
+//					__func__,
+//					inode->i_ino,
+	//				(unsigned long)block,
+		//			pos);
+//			printk("lwg:%s:buffer not mapped to block, using %pf to map %lu to block %08lx\n",
+//					__func__, get_block, inode->i_ino, (unsigned long)bh->b_blocknr);
 			if (err)
 				break;
 			if (buffer_new(bh)) {
@@ -1980,6 +2037,7 @@ int __block_write_begin(struct page *page, loff_t pos, unsigned len,
 	}
 	if (unlikely(err))
 		page_zero_new_buffers(page, from, to);
+//	DUMP_STACK_LWG();
 	return err;
 }
 EXPORT_SYMBOL(__block_write_begin);
@@ -1996,8 +2054,10 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 	blocksize = bh->b_size;
 
 	block_start = 0;
+	/* iterate through all the buffers, mark buffer dirty */
 	do {
 		block_end = block_start + blocksize;
+		/* lwg: this means it's a partial write */
 		if (block_end <= from || block_start >= to) {
 			if (!buffer_uptodate(bh))
 				partial = 1;
@@ -2017,8 +2077,11 @@ static int __block_commit_write(struct inode *inode, struct page *page,
 	 * the next read(). Here we 'discover' whether the page went
 	 * uptodate as a result of this (potentially partial) write.
 	 */
-	if (!partial)
+	if (!partial) {
+//		printk("lwg:%s:hellooooooooooooo\n", __func__);
 		SetPageUptodate(page);
+//		dump_stack();
+	}
 	return 0;
 }
 
@@ -2036,8 +2099,29 @@ int block_write_begin(struct address_space *mapping, loff_t pos, unsigned len,
 	int status;
 
 	page = grab_cache_page_write_begin(mapping, index, flags);
+	/* this block write comes from OFS */
+
+	if (flags & AOP_FLAG_OFS) {
+		printk("lwg:%s:%d:OFS block write captured\n", __func__, __LINE__);
+		page->flags |= 0x10000000;
+	}
+
 	if (!page)
 		return -ENOMEM;
+
+#if 0
+	/* lwg:This does not convey much information here since at this point only page struct is
+	 * retrieved while the mapping isn't setup */
+	if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
+			void *virtual;
+			virtual = page_address(page);
+			if (!PageHighMem(page)) {
+				printk("lwg:%s:%d:page [%p] not in high mem\n", __func__, __LINE__, (void*)page);
+			}
+			printk("lwg:%s:%d:page [%p] set to [%p]\n", __func__, __LINE__,  (void*)page, virtual);
+	}
+#endif
+
 
 	status = __block_write_begin(page, pos, len, get_block);
 	if (unlikely(status)) {
@@ -2082,7 +2166,7 @@ int block_write_end(struct file *file, struct address_space *mapping,
 
 	/* This could be a short (even 0-length) commit */
 	__block_commit_write(inode, page, start, start+copied);
-
+//	DUMP_STACK_LWG();
 	return copied;
 }
 EXPORT_SYMBOL(block_write_end);
@@ -2945,6 +3029,12 @@ static void end_bio_bh_io_sync(struct bio *bio)
 		set_bit(BH_Quiet, &bh->b_state);
 
 	bh->b_end_io(bh, !bio->bi_error);
+#if 0
+	if (bh->b_blocknr == 0x15) {
+		printk("lwg:%s:%d:end\n", __func__, __LINE__);
+		dump_stack();
+	}
+#endif
 	bio_put(bio);
 }
 
@@ -2999,6 +3089,8 @@ void guard_bio_eod(int rw, struct bio *bio)
 static int submit_bh_wbc(int rw, struct buffer_head *bh,
 			 unsigned long bio_flags, struct writeback_control *wbc)
 {
+
+//	DUMP_STACK_LWG();
 	struct bio *bio;
 
 	BUG_ON(!buffer_locked(bh));
@@ -3024,6 +3116,7 @@ static int submit_bh_wbc(int rw, struct buffer_head *bh,
 		wbc_account_io(wbc, bh->b_page, bh->b_size);
 	}
 
+	/* lwg: Convert logical block nr to phys block nr */
 	bio->bi_iter.bi_sector = bh->b_blocknr * (bh->b_size >> 9);
 	bio->bi_bdev = bh->b_bdev;
 
@@ -3037,12 +3130,27 @@ static int submit_bh_wbc(int rw, struct buffer_head *bh,
 	/* Take care of bh's that straddle the end of the device */
 	guard_bio_eod(rw, bio);
 
-	if (buffer_meta(bh))
+	if (buffer_meta(bh)) {
+		trace_printk("lwg:%s:write metadata buffer to %08lx\n", __func__, (unsigned long)bh->b_blocknr);
 		rw |= REQ_META;
+	}
 	if (buffer_prio(bh))
 		rw |= REQ_PRIO;
 
+//	printk("lwg:%s:current=%s:%s:%d:%08lx\n", __func__, current->comm, bh->b_bdev->bd_super->s_id, rw, blk_mapping);
 	submit_bio(rw, bio);
+
+	unsigned long blk_mapping = (unsigned long)bh->b_blocknr;
+	if (blk_mapping == 0x94) {
+		int j;
+		uint8_t *byte = bh->b_data;
+		printk("xxxxxxxxxxxxx\n");
+		for (j = 0; j < 8; j++) {
+			printk("[%02x] ", *(byte + j));
+		}
+		printk("\n");
+	}
+
 	return 0;
 }
 
@@ -3054,6 +3162,16 @@ EXPORT_SYMBOL_GPL(_submit_bh);
 
 int submit_bh(int rw, struct buffer_head *bh)
 {
+	if (bh->b_assoc_map) {
+		struct address_space *mapping;
+		struct super_block *sb;
+		mapping = bh->b_assoc_map;
+		sb = mapping->host->i_sb;
+		if (!strcmp(sb->s_type->name, "ext2")) {
+//			dump_stack();
+		}
+	}
+//	printk("lwg:%s:%d:[%d] for [%08llx], size = [%d]\n", __func__, __LINE__, rw, bh->b_blocknr, bh->b_size);
 	return submit_bh_wbc(rw, bh, 0, NULL);
 }
 EXPORT_SYMBOL(submit_bh);
@@ -3150,8 +3268,10 @@ int __sync_dirty_buffer(struct buffer_head *bh, int rw)
 }
 EXPORT_SYMBOL(__sync_dirty_buffer);
 
+/* lwg: called by ext2_sync_super... */
 int sync_dirty_buffer(struct buffer_head *bh)
 {
+//	dump_stack();
 	return __sync_dirty_buffer(bh, WRITE_SYNC);
 }
 EXPORT_SYMBOL(sync_dirty_buffer);

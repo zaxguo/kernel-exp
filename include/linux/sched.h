@@ -45,7 +45,7 @@ struct sched_param {
 #include <linux/rcupdate.h>
 #include <linux/rculist.h>
 #include <linux/rtmutex.h>
-
+#include <linux/stddef.h>
 #include <linux/time.h>
 #include <linux/param.h>
 #include <linux/resource.h>
@@ -63,6 +63,7 @@ struct sched_param {
 #include <asm/processor.h>
 
 #define SCHED_ATTR_SIZE_VER0	48	/* sizeof first published struct */
+
 
 /*
  * Extended scheduling parameters data structure.
@@ -134,6 +135,8 @@ struct perf_event_context;
 struct blk_plug;
 struct filename;
 struct nameidata;
+
+
 
 #define VMACACHE_BITS 2
 #define VMACACHE_SIZE (1U << VMACACHE_BITS)
@@ -1102,6 +1105,11 @@ struct sched_domain {
 	 * by attaching extra space to the end of the structure,
 	 * depending on how many CPUs the kernel has booted up with)
 	 */
+	/*
+	 * lwg: A sched domain's span means "balance process load among these
+			CPUs"
+		see -- Documentation/scheduler/sched-domains.txt
+	*/
 	unsigned long span[0];
 };
 
@@ -2069,6 +2077,8 @@ extern void thread_group_cputime_adjusted(struct task_struct *p, cputime_t *ut, 
 /*
  * Per process flags
  */
+// lwg:everyone would want to use the first bit
+#define PF_PSB		0x00000001
 #define PF_EXITING	0x00000004	/* getting shut down */
 #define PF_EXITPIDONE	0x00000008	/* pi exit done on shut down */
 #define PF_VCPU		0x00000010	/* I'm a virtual CPU */
@@ -2644,6 +2654,8 @@ extern char *get_task_comm(char *to, struct task_struct *tsk);
 
 #ifdef CONFIG_SMP
 void scheduler_ipi(void);
+// lwg:psb ipi
+void scheduler_ipi_psb(int start);
 extern unsigned long wait_task_inactive(struct task_struct *, long match_state);
 #else
 static inline void scheduler_ipi(void) { }
@@ -2664,11 +2676,14 @@ static inline unsigned long wait_task_inactive(struct task_struct *p,
 	for (p = &init_task ; (p = next_task(p)) != &init_task ; )
 
 extern bool current_is_single_threaded(void);
+// lwg:helper in lib/is_single_threaded.c
+extern bool task_is_single_threaded(struct task_struct *tsk);
 
 /*
  * Careful: do_each_thread/while_each_thread is a double loop so
  *          'break' will not work as expected - use goto instead.
  */
+// lwg:XXX:important!!!
 #define do_each_thread(g, t) \
 	for (g = t = &init_task ; (g = t = next_task(g)) != &init_task ; ) do
 

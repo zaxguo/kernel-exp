@@ -102,7 +102,8 @@ struct mmc_command {
 	struct mmc_data		*data;		/* data segment associated with cmd */
 	struct mmc_request	*mrq;		/* associated request */
 };
-
+/* lwg: where is data stored ?? */
+/* Seems to be in scatterlist? */
 struct mmc_data {
 	unsigned int		timeout_ns;	/* data timeout (in ns, max 80ms) */
 	unsigned int		timeout_clks;	/* data timeout (in clocks) */

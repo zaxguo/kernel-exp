@@ -1848,7 +1848,7 @@ out:
 /*
  * Suspend callback
  */
-static int mmc_suspend(struct mmc_host *host)
+int mmc_suspend(struct mmc_host *host)
 {
 	int err;
 
@@ -1860,6 +1860,7 @@ static int mmc_suspend(struct mmc_host *host)
 
 	return err;
 }
+EXPORT_SYMBOL(mmc_suspend);
 
 /*
  * This function tries to determine if the same card is still present
