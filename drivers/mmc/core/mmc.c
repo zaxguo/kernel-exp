@@ -1911,7 +1911,7 @@ static int mmc_shutdown(struct mmc_host *host)
 /*
  * Callback for resume.
  */
-static int mmc_resume(struct mmc_host *host)
+int mmc_resume(struct mmc_host *host)
 {
 	int err = 0;
 
@@ -1924,6 +1924,7 @@ static int mmc_resume(struct mmc_host *host)
 
 	return err;
 }
+EXPORT_SYMBOL(mmc_resume);
 
 /*
  * Callback for runtime_suspend.
@@ -2007,6 +2008,7 @@ static const struct mmc_bus_ops mmc_ops = {
 /*
  * Starting point for MMC card init.
  */
+extern struct mmc_host *lwg_mmc;
 int mmc_attach_mmc(struct mmc_host *host)
 {
 	int err;
@@ -2059,6 +2061,10 @@ int mmc_attach_mmc(struct mmc_host *host)
 		goto remove_card;
 
 	mmc_claim_host(host);
+
+	printk("lwg:%s:%d:XXX mmc = %p\n", __func__, __LINE__, (void *)host);
+	lwg_mmc = host;
+
 	return 0;
 
 remove_card:

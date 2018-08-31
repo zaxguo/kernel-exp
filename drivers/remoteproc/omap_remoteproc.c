@@ -820,6 +820,7 @@ static int omap_rproc_runtime_suspend(struct device *dev)
 	struct omap_rproc *oproc = rproc->priv;
 	int ret;
 
+	printk("lwg:%s:%d:going to suspend...\n", __func__, __LINE__);
 	if (WARN_ON(rproc->state != RPROC_RUNNING)) {
 		dev_err(dev, "rproc cannot be runtime suspended when not running!\n");
 		return -EBUSY;

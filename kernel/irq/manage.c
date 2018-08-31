@@ -1647,6 +1647,12 @@ int request_threaded_irq(unsigned int irq, irq_handler_t handler,
 	action->name = devname;
 	action->dev_id = dev_id;
 
+	if (irq == 340) {
+		printk("action   @ [%p]\n", (void *)action);
+		printk("handler  @ [%p]\n", (void *)&(action->handler));
+		printk("thread_fn@ [%p]\n", (void *)&(action->thread_fn));
+	}
+
 	chip_bus_lock(desc);
 	retval = __setup_irq(irq, desc, action);
 	chip_bus_sync_unlock(desc);

@@ -99,7 +99,7 @@ static inline void vchan_cookie_complete(struct virt_dma_desc *vd)
 	dev_vdbg(vc->chan.device->dev, "txd %p[%x]: marked complete\n",
 		 vd, cookie);
 	list_add_tail(&vd->node, &vc->desc_completed);
-
+	/* lwg: complete cmd should be executed by the tasklet */
 	tasklet_schedule(&vc->task);
 }
 

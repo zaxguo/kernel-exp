@@ -964,7 +964,7 @@ static void send_init_stream(struct omap_hsmmc_host *host)
 
 	OMAP_HSMMC_WRITE(host->base, IE, INT_EN_MASK);
 	OMAP_HSMMC_WRITE(host->base, CON,
-		OMAP_HSMMC_READ(host->base, CON) | INIT_STREAM);
+	OMAP_HSMMC_READ(host->base, CON) | INIT_STREAM);
 	OMAP_HSMMC_WRITE(host->base, CMD, INIT_STREAM_CMD);
 
 	timeout = jiffies + msecs_to_jiffies(MMC_TIMEOUT_MS);
@@ -1361,8 +1361,10 @@ static void omap_hsmmc_do_irq(struct omap_hsmmc_host *host, int status)
 			data->error = -EIO;
 		}
 
-		if (status & (CTO_EN | DTO_EN))
+		if (status & (CTO_EN | DTO_EN)) {
+//			printk("%s:%d: status = %08x\n", __func__, __LINE__, status);
 			hsmmc_command_incomplete(host, -ETIMEDOUT, end_cmd);
+		}
 		else if (status & (CCRC_EN | DCRC_EN | DEB_EN | CEB_EN |
 				   BADA_EN))
 			hsmmc_command_incomplete(host, -EILSEQ, end_cmd);
@@ -1405,6 +1407,8 @@ static irqreturn_t omap_hsmmc_irq(int irq, void *dev_id)
 {
 	struct omap_hsmmc_host *host = dev_id;
 	int status;
+
+//	printk("lwg:%s:%d:receiving irq = %d, host = %p\n",__func__, __LINE__, irq, (void*)host->mmc);
 
 	status = OMAP_HSMMC_READ(host->base, STAT);
 

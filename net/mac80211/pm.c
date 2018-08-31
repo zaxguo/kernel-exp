@@ -105,7 +105,7 @@ int __ieee80211_suspend(struct ieee80211_hw *hw, struct cfg80211_wowlan *wowlan)
 						    IEEE80211_CONF_CHANGE_PS);
 			}
 		}
-
+		/* lwg: calls into wl1271_op_suspend */
 		err = drv_suspend(local, wowlan);
 		if (err < 0) {
 			local->quiescing = false;

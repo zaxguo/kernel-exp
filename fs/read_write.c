@@ -499,7 +499,7 @@ ssize_t __vfs_write(struct file *file, const char __user *p, size_t count,
 	}
 	else if (file->f_op->write_iter) {
 		if (!strcmp(current->comm, "a.out")) {
-			printk("lwg:%s:using write_iter %pf\n",__func__, file->f_op->write_iter);
+//			printk("lwg:%s:using write_iter %pf\n",__func__, file->f_op->write_iter);
 //			dump_stack();
 		}
 		return new_sync_write(file, p, count, pos);

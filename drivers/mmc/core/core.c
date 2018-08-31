@@ -525,6 +525,7 @@ static void mmc_wait_for_req_done(struct mmc_host *host,
 		cmd->retries--;
 		cmd->error = 0;
 		__mmc_start_request(host, mrq);
+		printk("xxx\n");
 	}
 
 	mmc_retune_release(host);

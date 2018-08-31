@@ -1211,21 +1211,13 @@ no_page:
 	}
 //	DUMP_CONTENT_LWG(mapping->host->i_ino);
 	if (!strcmp(current->comm, TEST_COMM)) {
-		printk("lwg:%s:get page [%p] for [%lu]\n", __func__, page, ino);
+//		printk("lwg:%s:get page [%p] for [%lu]\n", __func__, page, ino);
 		if (ino == 2) {
-			dump_stack();
+//			dump_stack();
 		}
 	}
 	if ((!page) && ino != 0) {
 //		printk("lwg:%s:%lu on bdev %s doesn't have a page cache!\n", __func__, ino, mapping->host->i_sb->s_id);
-	} else if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
-		if (!is_new) /* lwg: indicating the page is found in exisiting page cache */
-			printk("lwg:%s:%d:get page %p for %lu on %s\n", __func__, __LINE__, page, ino, mapping->host->i_sb->s_id);
-#if 0
-		if (mapping->host->i_ino == 12)
-			dump_stack();
-#endif
-
 	}
 	return page;
 }
@@ -2284,12 +2276,14 @@ repeat:
 			return ERR_PTR(err);
 		}
 		err = filler(data, page);
+#if 0
 		if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
 			trace_printk("lwg:%s:alloc page %p for %lu on %s\n", __func__,
 					page, ino, mapping->host->i_sb->s_id);
 			trace_printk("lwg:%s:using %pf to fill new page %p of %lu\n", __func__,
 					filler, page, ino);
 		}
+#endif
 
 		if (err < 0) {
 			page_cache_release(page);
@@ -2623,7 +2617,7 @@ again:
 		if (page->flags & 0x10000000) {
 			int i;
 			char *kaddr;
-			printk("lwg:%s:%d:page@[%p]\n", __func__, __LINE__, (void *)page);
+//			printk("lwg:%s:%d:page@[%p]\n", __func__, __LINE__, (void *)page);
 #if 0
 			kaddr = kmap_atomic(page);
 			for(i = offset; i < offset + copied ; i++ ) {

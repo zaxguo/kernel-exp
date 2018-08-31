@@ -780,10 +780,14 @@ int lwg_test(void *data) {
 
 extern struct mmc_host *lwg_mmc;
 int mmc_suspend(struct mmc_host *host);
+int mmc_resume(struct mmc_host *host);
 int lwg_test_mmc(void *data) {
+	int err;
 	trace_printk("lwg:%s:%d:begins.\n", __func__, __LINE__);
 	mmc_suspend(lwg_mmc);
 	trace_printk("lwg:%s:%d:ends.\n", __func__, __LINE__);
+	err = mmc_resume(lwg_mmc);
+	printk("err = %d\n", err);
 	return 0;
 }
 
@@ -869,7 +873,7 @@ static int lwg_test_write(struct file *file, const char __user *buf, size_t coun
 		test_ofs_fds(test_fd);
 		break;
 	case 2:
-		lwg_test_mmc();
+		lwg_test_mmc(NULL);
 		break;
 	default:
 		break;
