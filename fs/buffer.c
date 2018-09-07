@@ -1706,7 +1706,7 @@ static struct buffer_head *create_page_buffers(struct page *page, struct inode *
 
 	if (!page_has_buffers(page)) {
 		if (!strcmp(current->comm, TEST_COMM)) {
-			printk("lwg:%s:doens't have page buffers, create\n", __func__);
+//			printk("lwg:%s:doens't have page buffers, create\n", __func__);
 		}
 		create_empty_buffers(page, 1 << ACCESS_ONCE(inode->i_blkbits), b_state);
 	}
@@ -2102,8 +2102,8 @@ int block_write_begin(struct address_space *mapping, loff_t pos, unsigned len,
 	/* this block write comes from OFS */
 
 	if (flags & AOP_FLAG_OFS) {
-		printk("lwg:%s:%d:OFS block write captured\n", __func__, __LINE__);
-		page->flags |= 0x10000000;
+//		printk("lwg:%s:%d:OFS block write captured\n", __func__, __LINE__);
+//		page->flags |= 0x10000000;
 	}
 
 	if (!page)

@@ -288,6 +288,8 @@ static int lo_write_simple(struct loop_device *lo, struct request *rq,
 	int ret = 0;
 
 	rq_for_each_segment(bvec, rq, iter) {
+		sector_t blknr = blk_rq_pos(rq);
+		printk("write:%08llx\n",blknr);
 		ret = lo_write_bvec(lo->lo_backing_file, &bvec, &pos);
 		if (ret < 0)
 			break;
@@ -346,6 +348,8 @@ static int lo_read_simple(struct loop_device *lo, struct request *rq,
 		iov_iter_bvec(&i, ITER_BVEC, &bvec, 1, bvec.bv_len);
 //		len = copy_to_iter();
 //		printk("lwg:%s:%d:copying sector [%08llx] to iterator, size = [%d]\n", __func__, __LINE__, blk_rq_pos(rq), bvec.bv_len);
+		sector_t blknr = blk_rq_pos(rq);
+		printk("read:%08llx\n", blknr);
 		len = vfs_iter_read(lo->lo_backing_file, &i, &pos); /* lwg: intercept this */
 #if 0
 		if (blk_rq_pos(rq) == 0x128)  {
@@ -555,7 +559,7 @@ static int do_req_filebacked(struct loop_device *lo, struct request *rq)
 	int ret;
 	/* lwg: 9 == 512 is the sector size of the block device (i.e., loop device) */
 	pos = ((loff_t) blk_rq_pos(rq) << 9) + lo->lo_offset;
-	printk("lwg:%s:%d: file_pos = [%08llx], sec = [%08llx], size = [%d]\n", __func__, __LINE__, pos, blk_rq_pos(rq), rq->__data_len);
+//	printk("lwg:%s:%d: file_pos = [%08llx], sec = [%08llx], size = [%d]\n", __func__, __LINE__, pos, blk_rq_pos(rq), rq->__data_len);
 
 	if (rq->cmd_flags & REQ_WRITE) {
 		if (rq->cmd_flags & REQ_FLUSH)

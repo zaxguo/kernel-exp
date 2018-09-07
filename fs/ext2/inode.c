@@ -778,7 +778,7 @@ int ext2_get_block(struct inode *inode, sector_t iblock, struct buffer_head *bh_
 		bh_result->b_size = (ret << inode->i_blkbits);
 		ret = 0;
 	}
-	printk("lwg:%s:%d:map bh to block [%llx],size = [%d]\n", __func__, __LINE__, bh_result->b_blocknr, bh_result->b_size);
+//	printk("lwg:%s:%d:map bh to block [%llx],size = [%d]\n", __func__, __LINE__, bh_result->b_blocknr, bh_result->b_size);
 	block = bh_result->b_blocknr;
 #if 0
 	/* page_size request from ext2_readpage which is from do_mpage_readpage */

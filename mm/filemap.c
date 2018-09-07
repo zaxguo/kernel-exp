@@ -1186,10 +1186,10 @@ no_page:
 			return NULL;
 		if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
 			is_new = 1;
-			printk("lwg:%s:alloc page %p for %lu on %s\n", __func__,
-					page, ino, mapping->host->i_sb->s_id);
+//			printk("lwg:%s:alloc page %p for %lu on %s\n", __func__,
+//					page, ino, mapping->host->i_sb->s_id);
 			/* lwg: address_space is per-inode, each address_space has a different page_tree */
-			printk("lwg:%s:%lu:adding page [%p] to radix tree [%p]\n", __func__, ino, page, &mapping->page_tree);
+//			printk("lwg:%s:%lu:adding page [%p] to radix tree [%p]\n", __func__, ino, page, &mapping->page_tree);
 		}
 		if (WARN_ON_ONCE(!(fgp_flags & FGP_LOCK)))
 			fgp_flags |= FGP_LOCK;
@@ -1218,6 +1218,10 @@ no_page:
 	}
 	if ((!page) && ino != 0) {
 //		printk("lwg:%s:%lu on bdev %s doesn't have a page cache!\n", __func__, ino, mapping->host->i_sb->s_id);
+	} else if (!strcmp(mapping->host->i_sb->s_id, "loop0")) {
+		if (!is_new) { /* lwg: indicating the page is found in exisiting page cache */
+//			printk("lwg:%s:%d:get page %p for %lu on %s\n", __func__, __LINE__, page, ino, mapping->host->i_sb->s_id);
+		}
 	}
 	return page;
 }

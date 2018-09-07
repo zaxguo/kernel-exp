@@ -305,9 +305,11 @@ sb_bread(struct super_block *sb, sector_t block)
 		dump_stack();
 	}
 #endif
+#if 0
 	if (!strcmp(sb->s_type->name, "ext2")) {
 		printk("lwg:%s:%s:reading [%08lx]\n", __func__, sb->s_id, (unsigned long)block);
 	}
+#endif
 	/* lwg:used for syncing metadata */
 	return __bread_gfp(sb->s_bdev, block, sb->s_blocksize, __GFP_MOVABLE);
 }
