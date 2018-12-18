@@ -875,6 +875,7 @@ static void __init do_basic_setup(void)
 {
 	cpuset_init_smp();
 	shmem_init();
+	/* pay attention! */
 	driver_init();
 	init_irq_proc();
 	do_ctors();
@@ -948,6 +949,7 @@ static inline void mark_readonly(void)
 }
 #endif
 
+/* called by a kernel thread... */
 static int __ref kernel_init(void *unused)
 {
 	int ret;
@@ -1024,6 +1026,8 @@ static noinline void __init kernel_init_freeable(void)
 
 	page_alloc_init_late();
 
+	/* lwg:here it initializes the device struct,
+	platform device, etc. and do init calls... */
 	do_basic_setup();
 
 	/* Open the /dev/console on the rootfs, this should never fail */

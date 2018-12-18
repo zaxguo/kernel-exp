@@ -289,7 +289,7 @@ static int lo_write_simple(struct loop_device *lo, struct request *rq,
 
 	rq_for_each_segment(bvec, rq, iter) {
 		sector_t blknr = blk_rq_pos(rq);
-		printk("write:%08llx\n",blknr);
+//		printk("write:%08llx,%d\n",blknr,bvec.bv_len);
 		ret = lo_write_bvec(lo->lo_backing_file, &bvec, &pos);
 		if (ret < 0)
 			break;
@@ -344,12 +344,13 @@ static int lo_read_simple(struct loop_device *lo, struct request *rq,
 	uint8_t *byte;
 	int j;
 
+
 	rq_for_each_segment(bvec, rq, iter) {
 		iov_iter_bvec(&i, ITER_BVEC, &bvec, 1, bvec.bv_len);
 //		len = copy_to_iter();
-//		printk("lwg:%s:%d:copying sector [%08llx] to iterator, size = [%d]\n", __func__, __LINE__, blk_rq_pos(rq), bvec.bv_len);
+//		printk("lwg:%s:%d:copying sector [%08llx] to iterator, size = [%d], sec = [%d]\n", __func__, __LINE__, blk_rq_pos(rq), bvec.bv_len, blk_rq_sectors(rq));
 		sector_t blknr = blk_rq_pos(rq);
-		printk("read:%08llx\n", blknr);
+//		printk("read:%08llx,%d\n", blknr, bvec.bv_len);
 		len = vfs_iter_read(lo->lo_backing_file, &i, &pos); /* lwg: intercept this */
 #if 0
 		if (blk_rq_pos(rq) == 0x128)  {

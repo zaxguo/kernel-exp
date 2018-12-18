@@ -591,52 +591,46 @@ static int sched_psb_show(struct seq_file *file, void *v) {
 	struct page *page;
 	dma_addr_t dma_addr;
 	uint8_t *byte;
-	int i = 0;
+	int i = 0, nr_pages;
+	nr_pages = 1024;
+	unsigned int id = read_cpuid_id();
+	printk("lwg:%s:%d:cpu id = %x\n", __func__, __LINE__, id);
+	return 0;
 	printk("lwg:%s:%d:cma_area_count = %d\n", __func__, __LINE__, cma_area_count);
 	for (i = 0; i < cma_area_count; i++) {
 		printk("cma[%d]:base_pfn=[%08lx]\n", i, cma_areas[i].base_pfn);
 	}
 	printk("dump stats of cma ----\n");
-	vaddr = (void *)dma_alloc_from_contiguous(NULL, 1024, 8);
-	page = (struct page *)vaddr;
-	pfn = page_to_pfn(page);
-//	vaddr =  dma_alloc_coherent(NULL, 1024 * 4096, &dma_addr, GFP_KERNEL);
+	vaddr = (void *)dma_alloc_from_contiguous(NULL, nr_pages, 8);
 	if (!vaddr) {
 		printk("failed to allocate CMA\n");
 		return 0;
 	}
+	page = (struct page *)vaddr;
+	pfn = page_to_pfn(page);
 	printk("vaddr = [%p], pfn = [%lx], pa = [%lx]\n", vaddr, page_to_pfn(page), page_to_phys(page));
 	printk("[%p] isHighmem = %d\n", vaddr, PageHighMem((struct page*)vaddr));
-	vaddr = kmap_atomic(page);
-	byte = (uint8_t *)vaddr;
-	for (i = 0; i < 8; ++i) {
-		*(byte + i) = i;
-		printk("[0x%02x] ", *(byte + i));
-	}
-	printk("\n");
-	printk("dump pfn --- \n");
-	vaddr = ioremap(__pfn_to_phys(pfn), PAGE_SIZE);
-	if (!vaddr) {
-		printk("ioremap XXX\n");
+	struct file *f = filp_open("/home/root/ext2_4m.new", O_RDWR, 0600);
+	if (!f) {
+		printk("no such file! return...\n");
 		return 0;
 	}
-	for (i = 0; i < 8; ++i) {
-		printk("[0x%02x] ", *(uint8_t *)(vaddr + i));
+	char buf[4096];
+	memset(buf, 0, 4096);
+	int pos = 0;
+	for (i = 0; i < nr_pages; i++) {
+		pfn = page_to_pfn(page) + i;
+		struct page *tmp = pfn_to_page(pfn);
+		void *addr;
+		printk("starting to map page...\n");
+		addr = kmap_atomic(tmp);
+		printk("reading %dth page...\n", i);
+		pos += kernel_read(f, pos, buf, 4096);
+		printk("vaddr = [%p], pfn = [%lx], pa = [%llx]\n", addr, pfn, page_to_phys(tmp));
+		memcpy(addr, buf, 4096);
+		kunmap(tmp);
 	}
-	printk("\n");
-	printk("pfn + 1024 = [%lx]\n", pfn + 1023);
-	page = pfn_to_page(pfn + 1023);
-	vaddr = kmap_atomic(page);
-	printk("new page @ [%p]\n", (void *) page);
-	byte = (uint8_t *)vaddr;
-
-	for (i = 0; i < 8; ++i) {
-		printk("[0x%02x] ", *(byte + i));
-	}
-
-
-
-
+	printk("finished...\n");
 	return 0;
 }
 
@@ -791,6 +785,7 @@ int lwg_test_mmc(void *data) {
 	return 0;
 }
 
+
 static void lwg_test_wrapper(void) {
 	/* create kthread */
 	if (test_fd != -1) {
@@ -854,6 +849,51 @@ static void test_ofs_fds(unsigned long fd) {
 	printk("lwg:%s:%d:[%s]\n", __func__, __LINE__, buf);
 }
 
+
+static int lwg_read_img(void) {
+	int i = 0, nr_pages;
+	struct page *page;
+	void *vaddr;
+	int pfn;
+	nr_pages = 8192;
+	printk("lwg:%s:%d:cma_area_count = %d\n", __func__, __LINE__, cma_area_count);
+	for (i = 0; i < cma_area_count; i++) {
+		printk("cma[%d]:base_pfn=[%08lx]\n", i, cma_areas[i].base_pfn);
+	}
+	printk("dump stats of cma ----\n");
+	vaddr = (void *)cma_alloc(&cma_areas[0], nr_pages, 8);
+	if (!vaddr) {
+		printk("failed to allocate CMA\n");
+		return 0;
+	}
+	page = (struct page *)vaddr;
+	pfn = page_to_pfn(page);
+	printk("vaddr = [%p], pfn = [%lx], pa = [%lx]\n", vaddr, page_to_pfn(page), page_to_phys(page));
+	printk("[%p] isHighmem = %d\n", vaddr, PageHighMem((struct page*)vaddr));
+	struct file *f = filp_open("/home/root/f2fs.img", O_RDWR, 0600);
+	if (!f) {
+		printk("no such file! return...\n");
+		return 0;
+	}
+	char buf[4096];
+	memset(buf, 0, 4096);
+	int pos = 0;
+	for (i = 0; i < nr_pages; i++) {
+		pfn = page_to_pfn(page) + i;
+		struct page *tmp = pfn_to_page(pfn);
+		void *addr;
+//		printk("starting to map page...\n");
+		addr = kmap(tmp);
+//		printk("reading %dth page...\n", i);
+		pos += kernel_read(f, pos, buf, 4096);
+//		printk("vaddr = [%p], pfn = [%lx], pa = [%llx]\n", addr, pfn, page_to_phys(tmp));
+		memcpy(addr, buf, 4096);
+		kunmap(tmp);
+	}
+	printk("finished...\n");
+	return 0;
+}
+
 static int lwg_test_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos) {
 	int test_case, rc;
 	struct task_struct *tsk;
@@ -874,6 +914,9 @@ static int lwg_test_write(struct file *file, const char __user *buf, size_t coun
 		break;
 	case 2:
 		lwg_test_mmc(NULL);
+		break;
+	case 3:
+		kthread_run(lwg_read_img, NULL, "read_img");
 		break;
 	default:
 		break;
