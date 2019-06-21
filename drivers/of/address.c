@@ -876,7 +876,7 @@ void __iomem *of_iomap(struct device_node *np, int index)
 
 	if (of_address_to_resource(np, index, &res))
 		return NULL;
-
+	pr_err("lwg:%s:%d:name = %s, phys = %lx, size = %lx\n", __func__, __LINE__, np->name, res.start, resource_size(&res));
 	return ioremap(res.start, resource_size(&res));
 }
 EXPORT_SYMBOL(of_iomap);

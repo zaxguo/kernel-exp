@@ -1271,6 +1271,19 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			unsigned long pgoff, unsigned long *populate)
 {
 	struct mm_struct *mm = current->mm;
+	bool is_target = false;
+#define TARGET "out"
+#define PROBE() if (is_target) { \
+					printk("%s:%d:hit\n", __func__, __LINE__); \
+				}\
+
+	if (file) {
+		if (!strcmp(file->f_path.dentry->d_name.name, TARGET)) {
+			is_target = true;
+			printk("%s:%d:addr = %08lx, len = %08lx, off = %08lx\n", __func__, __LINE__, addr, len, pgoff);
+		}
+	}
+
 
 	*populate = 0;
 
@@ -1366,6 +1379,7 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 			break;
 
 		default:
+			PROBE();
 			return -EINVAL;
 		}
 	} else {
@@ -1409,6 +1423,10 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	    ((vm_flags & VM_LOCKED) ||
 	     (flags & (MAP_POPULATE | MAP_NONBLOCK)) == MAP_POPULATE))
 		*populate = len;
+	PROBE();
+	if (is_target) {
+		printk("%s:%d:addr = %08lx\n", __func__, __LINE__, addr);
+	}
 	return addr;
 }
 

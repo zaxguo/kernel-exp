@@ -3290,7 +3290,13 @@ void __init of_clk_init(const struct of_device_id *matches)
 		list_for_each_entry_safe(clk_provider, next,
 					&clk_provider_list, node) {
 			if (force || parent_ready(clk_provider->np)) {
-
+#if 0
+				if(!np) {
+					pr_err("lwg:%s:%d:XXX:np is nil\n", __func__, __LINE__);
+				} else {
+					pr_err("lwg:%s:%d:XXX:np name = %s\n", __func__, __LINE__, np->name);
+				}
+#endif 
 				clk_provider->clk_init_cb(clk_provider->np);
 				of_clk_set_defaults(clk_provider->np, true);
 

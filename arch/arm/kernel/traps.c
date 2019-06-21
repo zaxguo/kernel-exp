@@ -457,7 +457,48 @@ die_sig:
 	info.si_errno = 0;
 	info.si_code  = ILL_ILLOPC;
 	info.si_addr  = pc;
+	{ /* lwg: dump info... */
 
+		pr_info("%s (%d): undefined instruction: pc=%p, insn = %x, regs=%p\n",
+			current->comm, task_pid_nr(current), pc, instr, regs);
+		if (instr == BUG_INSTR_VALUE)  {
+			printk("XXX::%s:%d:kernel BUG_ON reached\n", __func__, __LINE__);
+			goto die;
+		}
+#if 0
+		__show_regs(regs);
+		dump_instr(KERN_INFO, regs);
+#endif
+		/* skip the instruction */
+//		printk("------------------------\n");
+//		unsigned long *sp = (unsigned long *)regs->uregs[13];
+//		unsigned long *sp = (unsigned long *)(current_stack_pointer + 0x70 - 8);
+//		unsigned long psp = regs->uregs[13];
+
+		/* mrc p15, rd, 0, 0, 5 */
+		if ((unsigned long)instr == 0xee101fb0) {
+			unsigned long insn = (u32)0xe3a01000; /* mov r1, #0 */
+			u32 *_pc = (unsigned long)pc;
+			*_pc = insn; /* overwriting the original mrc p15, xxx which is used to get current process ID */
+			flush_cache_all();
+			printk("lwg: finish patching %08lx with %08lx\n....", pc, insn);
+		}
+
+		unsigned long *sp = (unsigned long *)((unsigned long)current_stack_pointer);
+//		unsigned long *sp = (unsigned long *)(psp);
+		/*sp = (unsigned long)sp + 0x64;*/
+		
+		/*sp = (unsigned long)sp + 0x64; */
+		/**sp = (unsigned long)pc + 4; [> skipping.. <]*/
+		regs->ARM_pc += 4;
+		/*dump_mem("", "Dumping sp...", sp, sp + 60 );*/
+		/*printk("sp[%08lx] = %08lx\n", (unsigned long)sp, *sp);*/
+//		sp = (unsigned long)sp + 8;
+//		printk("sp[%08lx] = %08lx\n", (unsigned long)sp, *sp);
+//		printk("------------------------\n");
+		return;
+	}
+die:
 	arm_notify_die("Oops - undefined instruction", regs, &info, 0, 6);
 }
 

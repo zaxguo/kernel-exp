@@ -287,6 +287,7 @@ static void __iomem * __arm_ioremap_pfn_caller(unsigned long pfn,
 	if (size && !(sizeof(phys_addr_t) == 4 && pfn >= 0x100000)) {
 		struct static_vm *svm;
 
+		/*pr_err("lwg:%s:%d:called....caller %pf, pfn = %lx\n", __func__, __LINE__, caller, pfn);*/
 		svm = find_static_vm_paddr(paddr, size, mtype);
 		if (svm) {
 			addr = (unsigned long)svm->vm.addr;

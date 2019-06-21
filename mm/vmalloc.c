@@ -1342,10 +1342,12 @@ static struct vm_struct *__get_vm_area_node(unsigned long size,
 	size = PAGE_ALIGN(size);
 	if (unlikely(!size))
 		return NULL;
-
+	/*pr_err("lwg:%s:%d:caller -- %pF\n", __func__, __LINE__, caller);*/
 	area = kzalloc_node(sizeof(*area), gfp_mask & GFP_RECLAIM_MASK, node);
-	if (unlikely(!area))
+	if (unlikely(!area)) {
+		pr_err("lwg:%s:%d:!!!!! why am I here??\n", __func__, __LINE__);
 		return NULL;
+	}
 
 	if (!(flags & VM_NO_GUARD))
 		size += PAGE_SIZE;

@@ -1356,7 +1356,9 @@ try_onemore:
 	}
 
 	sbi->cp_expires = round_jiffies_up(jiffies);
-
+	printk("logic block size = %d, sector per block = %d\n",
+			sbi->log_blocksize,
+			sbi->log_sectors_per_block);
 	return 0;
 
 free_kobj:

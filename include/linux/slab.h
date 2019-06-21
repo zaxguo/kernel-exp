@@ -505,6 +505,11 @@ static __always_inline void *kmalloc_node(size_t size, gfp_t flags, int node)
 		if (!i)
 			return ZERO_SIZE_PTR;
 
+		//pr_err("lwg:%s:%d:hit!!!!!!!!!!!!!\n", __func__, __LINE__);
+		if (!kmalloc_caches[i]) {
+			pr_err("lwg:%s:%d:nil!!!!!!!!!!!!!\n", __func__, __LINE__);
+			dump_stack();
+		}
 		return kmem_cache_alloc_node_trace(kmalloc_caches[i],
 						flags, node, size);
 	}

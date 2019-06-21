@@ -282,10 +282,23 @@ unsigned long vm_mmap(struct file *file, unsigned long addr,
 	unsigned long len, unsigned long prot,
 	unsigned long flag, unsigned long offset)
 {
-	if (unlikely(offset + PAGE_ALIGN(len) < offset))
+	bool is_target = false;
+	#define PROBE() if (is_target) { \
+					printk("%s:%d:hit\n", __func__, __LINE__); \
+				}\
+
+	if (!strcmp(file->f_path.dentry->d_name.name, "out")) {
+		is_target = true;
+	}
+
+	if (unlikely(offset + PAGE_ALIGN(len) < offset)) {
+		PROBE();
 		return -EINVAL;
-	if (unlikely(offset_in_page(offset)))
+	}
+	if (unlikely(offset_in_page(offset))) {
+		PROBE();
 		return -EINVAL;
+	}
 
 	return vm_mmap_pgoff(file, addr, len, prot, flag, offset >> PAGE_SHIFT);
 }

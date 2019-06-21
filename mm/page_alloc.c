@@ -2068,10 +2068,12 @@ void free_hot_cold_page(struct page *page, bool cold)
 	}
 
 	pcp = &this_cpu_ptr(zone->pageset)->pcp;
-	if (!cold)
+	if (!cold) {
 		list_add(&page->lru, &pcp->lists[migratetype]);
-	else
+		printk_once("lwg:%s:%d:pcp %p, zone = %p, pageset = %p\n", __func__, __LINE__, pcp, zone, &zone->pageset);
+	} else {
 		list_add_tail(&page->lru, &pcp->lists[migratetype]);
+	}
 	pcp->count++;
 	if (pcp->count >= pcp->high) {
 		unsigned long batch = READ_ONCE(pcp->batch);
@@ -4334,6 +4336,7 @@ static int __build_all_zonelists(void *data)
 	 */
 	for_each_possible_cpu(cpu) {
 		setup_pageset(&per_cpu(boot_pageset, cpu), 0);
+		printk("-----lwg:%s:%d:cpu[%d]:pageset @ %p\n", __func__, __LINE__, cpu, &per_cpu(boot_pageset, cpu));
 
 #ifdef CONFIG_HAVE_MEMORYLESS_NODES
 		/*
@@ -4374,6 +4377,7 @@ void __ref build_all_zonelists(pg_data_t *pgdat, struct zone *zone)
 	set_zonelist_order();
 
 	if (system_state == SYSTEM_BOOTING) {
+		printk("lwg:%s:%d:zone == %p\n", __func__, __LINE__, zone);
 		build_all_zonelists_init();
 	} else {
 #ifdef CONFIG_MEMORY_HOTPLUG
@@ -4638,8 +4642,10 @@ static void pageset_init(struct per_cpu_pageset *p)
 
 	pcp = &p->pcp;
 	pcp->count = 0;
-	for (migratetype = 0; migratetype < MIGRATE_PCPTYPES; migratetype++)
+	for (migratetype = 0; migratetype < MIGRATE_PCPTYPES; migratetype++) {
+		pr_err("-----------------%s:%d:init %p\n", __func__, __LINE__, pcp);
 		INIT_LIST_HEAD(&pcp->lists[migratetype]);
+	}
 }
 
 static void setup_pageset(struct per_cpu_pageset *p, unsigned long batch)
@@ -4685,8 +4691,10 @@ static void __meminit setup_zone_pageset(struct zone *zone)
 {
 	int cpu;
 	zone->pageset = alloc_percpu(struct per_cpu_pageset);
-	for_each_possible_cpu(cpu)
+	for_each_possible_cpu(cpu) {
+		printk("lwg:%s:%d:called... cpu = %d\n", __func__, __LINE__, cpu);
 		zone_pageset_init(zone, cpu);
+	}
 }
 
 /*

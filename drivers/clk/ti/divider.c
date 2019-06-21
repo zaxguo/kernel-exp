@@ -105,6 +105,8 @@ static unsigned long ti_clk_divider_recalc_rate(struct clk_hw *hw,
 	val = ti_clk_ll_ops->clk_readl(divider->reg) >> divider->shift;
 	val &= div_mask(divider);
 
+	/*pr_err("lwg:%s:%d:reading 0x%08x...: val = %x, mask = %x\n", __func__, __LINE__, divider->reg, val, div_mask(divider));*/
+
 	div = _get_div(divider, val);
 	if (!div) {
 		WARN(!(divider->flags & CLK_DIVIDER_ALLOW_ZERO),
@@ -349,6 +351,7 @@ static struct clk *_register_divider(struct device *dev, const char *name,
 	div->table = table;
 
 	/* register the clock */
+	pr_err("lwg:%s:%d:registering %s....\n", __func__, __LINE__, name);
 	clk = clk_register(dev, &div->hw);
 
 	if (IS_ERR(clk))

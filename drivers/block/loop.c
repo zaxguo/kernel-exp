@@ -77,6 +77,7 @@
 #include <linux/falloc.h>
 #include <linux/uio.h>
 #include "loop.h"
+#include <crypto/hash.h>
 
 #include <asm/uaccess.h>
 
@@ -289,7 +290,7 @@ static int lo_write_simple(struct loop_device *lo, struct request *rq,
 
 	rq_for_each_segment(bvec, rq, iter) {
 		sector_t blknr = blk_rq_pos(rq);
-		printk("write:%08llx\n",blknr);
+//		printk("write:%08llx,%d\n",blknr,bvec.bv_len);
 		ret = lo_write_bvec(lo->lo_backing_file, &bvec, &pos);
 		if (ret < 0)
 			break;
@@ -334,6 +335,45 @@ static int lo_write_transfer(struct loop_device *lo, struct request *rq,
 	return ret;
 }
 
+
+static void _ofs_calc_hash(uint8_t *addr, uint8_t *out, unsigned int len) {
+	struct scatterlist sg;
+	struct hash_desc desc;
+	sg_init_one(&sg, addr, len);
+	desc.tfm = crypto_alloc_hash("sha1", 0, 0);
+	crypto_hash_init(&desc);
+	crypto_hash_update(&desc, &sg, len);
+	crypto_hash_final(&desc, out);
+	crypto_free_hash(desc.tfm);
+}
+
+static void ofs_calc_hash_bio(struct bio_vec *bvec) {
+	unsigned int count = bvec->bv_len;
+	uint8_t *byte = kmap_atomic(bvec->bv_page);
+	uint8_t out[40]; /* SHA1 */
+	int i = 0;
+	_ofs_calc_hash(byte, out, count);
+	kunmap(bvec->bv_page);
+	printk(KERN_CONT"sha1: ");
+	for (i = 0; i < 40; i++) {
+		printk(KERN_CONT "%x", out[i]);
+	}
+	printk("\n");
+	return;
+}
+
+static uint32_t ofs_calc_checksum(struct bio_vec *bvec) {
+	uint32_t ret = 0;
+	unsigned int count = bvec->bv_len;
+	uint8_t *byte = kmap(bvec->bv_page);
+	int i = 0;
+	for (i = 0; i < count; i++) {
+		ret += byte[i]; /* byte-wise addition */
+	}
+	kunmap(bvec->bv_page);
+	return ret;
+}
+
 static int lo_read_simple(struct loop_device *lo, struct request *rq,
 		loff_t pos)
 {
@@ -344,13 +384,16 @@ static int lo_read_simple(struct loop_device *lo, struct request *rq,
 	uint8_t *byte;
 	int j;
 
+
+	printk("%s:%d:lwg:start\n", __func__, __LINE__);
 	rq_for_each_segment(bvec, rq, iter) {
 		iov_iter_bvec(&i, ITER_BVEC, &bvec, 1, bvec.bv_len);
 //		len = copy_to_iter();
-//		printk("lwg:%s:%d:copying sector [%08llx] to iterator, size = [%d]\n", __func__, __LINE__, blk_rq_pos(rq), bvec.bv_len);
-		sector_t blknr = blk_rq_pos(rq);
-		printk("read:%08llx\n", blknr);
+//		printk("lwg:%s:%d:copying sector [%08llx] to iterator, size = [%d], sec = [%d]\n", __func__, __LINE__, blk_rq_pos(rq), bvec.bv_len, blk_rq_sectors(rq));
+//		sector_t blknr = blk_rq_pos(rq);
+		sector_t blknr = iter.iter.bi_sector;
 		len = vfs_iter_read(lo->lo_backing_file, &i, &pos); /* lwg: intercept this */
+		printk("read:%08llx,%d,pos = %08llx\n", blknr, bvec.bv_len, pos);
 #if 0
 		if (blk_rq_pos(rq) == 0x128)  {
 			byte = kmap_atomic(bvec.bv_page);
@@ -361,11 +404,15 @@ static int lo_read_simple(struct loop_device *lo, struct request *rq,
 		}
 #endif
 
-
 		if (len < 0)
 			return len;
 
 		flush_dcache_page(bvec.bv_page);
+
+//		ofs_calc_hash_bio(&bvec);
+		uint32_t checksum;
+		checksum = ofs_calc_checksum(&bvec);
+		printk("lwg:%s:%d:checksum = %08x\n", __func__, __LINE__, checksum);
 
 		if (len != bvec.bv_len) {
 			struct bio *bio;
@@ -376,6 +423,7 @@ static int lo_read_simple(struct loop_device *lo, struct request *rq,
 		}
 		cond_resched();
 	}
+	printk("%s:%d:lwg:end\n", __func__, __LINE__);
 
 	return 0;
 }
@@ -2049,6 +2097,7 @@ static int __init loop_init(void)
 	mutex_unlock(&loop_index_mutex);
 
 	printk(KERN_INFO "loop: module loaded\n");
+	/* XXX */
 	return 0;
 
 misc_out:

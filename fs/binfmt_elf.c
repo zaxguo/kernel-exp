@@ -341,13 +341,34 @@ static unsigned long elf_map(struct file *filep, unsigned long addr,
 	unsigned long map_addr;
 	unsigned long size = eppnt->p_filesz + ELF_PAGEOFFSET(eppnt->p_vaddr);
 	unsigned long off = eppnt->p_offset - ELF_PAGEOFFSET(eppnt->p_vaddr);
+	bool is_target = false;
+
+#define TARGET "out"
+#define PROBE() if (is_target) { \
+					printk("%s:%d:hit\n", __func__, __LINE__); \
+				}\
+
+
+	/* XXX:examine section size, etc. */
+
 	addr = ELF_PAGESTART(addr);
 	size = ELF_PAGEALIGN(size);
 
+	if (filep->f_path.dentry != 0) {
+		if (!strcmp(filep->f_path.dentry->d_name.name, TARGET)) {
+			is_target = true;
+			printk("%s:%d:catch the target binary...\n", __func__, __LINE__);
+			printk("%s:%d:addr = %08lx, size = %08lx, total size = %08lx\n", __func__, __LINE__, addr, size, total_size);
+		}
+	}
+
+
 	/* mmap() will return -EINVAL if given a zero size, but a
 	 * segment with zero filesize is perfectly valid */
-	if (!size)
+	if (!size) {
+		PROBE();
 		return addr;
+	}
 
 	/*
 	* total_size is the size of the ELF (interpreter) image.
@@ -360,10 +381,15 @@ static unsigned long elf_map(struct file *filep, unsigned long addr,
 	if (total_size) {
 		total_size = ELF_PAGEALIGN(total_size);
 		map_addr = vm_mmap(filep, addr, total_size, prot, type, off);
-		if (!BAD_ADDR(map_addr))
+		if (!BAD_ADDR(map_addr)) {
+			PROBE();
 			vm_munmap(map_addr+size, total_size-size);
-	} else
+		}
+	} else {
 		map_addr = vm_mmap(filep, addr, size, prot, type, off);
+		PROBE();
+//		printk("%s:%d:map addr = %08lx\n", __func__, __LINE__, map_addr);
+	}
 
 	return(map_addr);
 }
@@ -683,8 +709,22 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		struct elfhdr interp_elf_ex;
 	} *loc;
 	struct arch_elf_state arch_state = INIT_ARCH_ELF_STATE;
+	int is_target = false;
 
 	loc = kmalloc(sizeof(*loc), GFP_KERNEL);
+
+#define TARGET	"./penzai.o"
+#define PROBE() if (is_target) { \
+					printk("%s:%d:hit, ret = %d\n", __func__, __LINE__, retval); \
+				}\
+
+	/* lwg: by the time we should have a loaded elf file */
+	if (!strcmp(bprm->filename, TARGET)) {
+		printk("We are trying to load target file...\n");
+		is_target = true;
+	}
+
+
 	if (!loc) {
 		retval = -ENOMEM;
 		goto out_ret;
@@ -767,6 +807,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			if (retval != sizeof(loc->interp_elf_ex)) {
 				if (retval >= 0)
 					retval = -EIO;
+				PROBE();
 				goto out_free_dentry;
 			}
 
@@ -789,8 +830,10 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			retval = arch_elf_pt_proc(&loc->elf_ex, elf_ppnt,
 						  bprm->file, false,
 						  &arch_state);
-			if (retval)
+			if (retval) {
+				PROBE();
 				goto out_free_dentry;
+			}
 			break;
 		}
 
@@ -798,17 +841,23 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	if (elf_interpreter) {
 		retval = -ELIBBAD;
 		/* Not an ELF interpreter */
-		if (memcmp(loc->interp_elf_ex.e_ident, ELFMAG, SELFMAG) != 0)
+		if (memcmp(loc->interp_elf_ex.e_ident, ELFMAG, SELFMAG) != 0) {
+			PROBE();
 			goto out_free_dentry;
+		}
 		/* Verify the interpreter has a valid arch */
-		if (!elf_check_arch(&loc->interp_elf_ex))
+		if (!elf_check_arch(&loc->interp_elf_ex)) {
+			PROBE();
 			goto out_free_dentry;
+		}
 
 		/* Load the interpreter program headers */
 		interp_elf_phdata = load_elf_phdrs(&loc->interp_elf_ex,
 						   interpreter);
-		if (!interp_elf_phdata)
+		if (!interp_elf_phdata) {
+			PROBE();
 			goto out_free_dentry;
+		}
 
 		/* Pass PT_LOPROC..PT_HIPROC headers to arch code */
 		elf_ppnt = interp_elf_phdata;
@@ -818,8 +867,10 @@ static int load_elf_binary(struct linux_binprm *bprm)
 				retval = arch_elf_pt_proc(&loc->interp_elf_ex,
 							  elf_ppnt, interpreter,
 							  true, &arch_state);
-				if (retval)
+				if (retval) {
+					PROBE();
 					goto out_free_dentry;
+				}
 				break;
 			}
 	}
@@ -830,13 +881,17 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	 * the exec syscall.
 	 */
 	retval = arch_check_elf(&loc->elf_ex, !!interpreter, &arch_state);
-	if (retval)
+	if (retval) {
+		PROBE();
 		goto out_free_dentry;
+	}
 
 	/* Flush all traces of the currently running executable */
 	retval = flush_old_exec(bprm);
-	if (retval)
+	if (retval) {
+		PROBE();
 		goto out_free_dentry;
+	}
 
 	/* Do this immediately, since STACK_TOP as used in setup_arg_pages
 	   may depend on the personality.  */
@@ -853,8 +908,10 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	   change some of these later */
 	retval = setup_arg_pages(bprm, randomize_stack_top(STACK_TOP),
 				 executable_stack);
-	if (retval < 0)
+	if (retval < 0) {
+		PROBE();
 		goto out_free_dentry;
+	}
 	
 	current->mm->start_stack = bprm->p;
 
@@ -877,8 +934,10 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			   and clear the area.  */
 			retval = set_brk(elf_bss + load_bias,
 					 elf_brk + load_bias);
-			if (retval)
+			if (retval) {
+				PROBE();
 				goto out_free_dentry;
+			}
 			nbyte = ELF_PAGEOFFSET(elf_bss);
 			if (nbyte) {
 				nbyte = ELF_MIN_ALIGN - nbyte;
@@ -919,6 +978,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 			total_size = total_mapping_size(elf_phdata,
 							loc->elf_ex.e_phnum);
 			if (!total_size) {
+				PROBE();
 				retval = -EINVAL;
 				goto out_free_dentry;
 			}
@@ -926,9 +986,19 @@ static int load_elf_binary(struct linux_binprm *bprm)
 
 		error = elf_map(bprm->file, load_bias + vaddr, elf_ppnt,
 				elf_prot, elf_flags, total_size);
+		PROBE();
 		if (BAD_ADDR(error)) {
 			retval = IS_ERR((void *)error) ?
 				PTR_ERR((void*)error) : -EINVAL;
+			/* The linked file contains vector section which has addr 000000 but is code!
+			 * Linux does not like this... */
+			printk("%s:%d; bad addr == %08x\n", __func__,__LINE__, error);
+			printk("%s:%d: dumping the faulty elf...\n", __func__, __LINE__);
+			printk("%s:%d: size = %08lx, memsz = %08lx\n", __func__, __LINE__, elf_ppnt->p_filesz,
+					elf_ppnt->p_memsz);
+
+			/* elf_map return ffffffea --> EINVAL */
+			PROBE(); /* lwg: we found out why our bin won't load... */
 			goto out_free_dentry;
 		}
 
@@ -956,7 +1026,27 @@ static int load_elf_binary(struct linux_binprm *bprm)
 		if (BAD_ADDR(k) || elf_ppnt->p_filesz > elf_ppnt->p_memsz ||
 		    elf_ppnt->p_memsz > TASK_SIZE ||
 		    TASK_SIZE - elf_ppnt->p_memsz < k) {
+
 			/* set_brk can never work. Avoid overflows. */
+
+			/* lwg:dump some info here.. */
+			if (BAD_ADDR(k)) {
+				printk("%s:%d:bad load addr!\n", __func__, __LINE__);
+			}
+
+			if (elf_ppnt->p_filesz > elf_ppnt->p_memsz) {
+				printk("%s:%d:file too large!\n", __func__, __LINE__);
+			}
+
+			if (elf_ppnt->p_memsz > TASK_SIZE) {
+				printk("%s:%d:section size too large!\n", __func__, __LINE__);
+			}
+
+			if (TASK_SIZE - elf_ppnt->p_memsz < k) {
+				printk("%s:%d:wrong load size!\n", __func__, __LINE__);
+			}
+
+			PROBE();
 			retval = -EINVAL;
 			goto out_free_dentry;
 		}
@@ -1035,6 +1125,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 
 #ifdef ARCH_HAS_SETUP_ADDITIONAL_PAGES
 	retval = arch_setup_additional_pages(bprm, !!elf_interpreter);
+	PROBE();
 	if (retval < 0)
 		goto out;
 #endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
@@ -1042,6 +1133,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	install_exec_creds(bprm);
 	retval = create_elf_tables(bprm, &loc->elf_ex,
 			  load_addr, interp_load_addr);
+	PROBE();
 	if (retval < 0)
 		goto out;
 	/* N.B. passed_fileno might not be initialized? */
@@ -1087,17 +1179,24 @@ static int load_elf_binary(struct linux_binprm *bprm)
 out:
 	kfree(loc);
 out_ret:
+
+	if (is_target) {
+		printk("%s:%d:ret = %d\n", __func__, __LINE__, retval);
+	}
 	return retval;
 
 	/* error cleanup */
 out_free_dentry:
+	PROBE();
 	kfree(interp_elf_phdata);
 	allow_write_access(interpreter);
 	if (interpreter)
 		fput(interpreter);
 out_free_interp:
+	PROBE();
 	kfree(elf_interpreter);
 out_free_ph:
+	PROBE();
 	kfree(elf_phdata);
 	goto out;
 }

@@ -138,6 +138,8 @@ static int l3_handle_target(struct omap_l3 *l3, void __iomem *base,
 		 (m_req_info & BIT(1)) ? "Supervisor" : "User",
 		 (m_req_info & BIT(3)) ? "Debug" : "Functional");
 
+#if 1
+	/* lwg:XXX: do not print... */
 	WARN(true,
 	     "%s:L3 %s Error: MASTER %s TARGET %s (%s)%s%s\n",
 	     dev_name(l3->dev),
@@ -145,6 +147,7 @@ static int l3_handle_target(struct omap_l3 *l3, void __iomem *base,
 	     master_name, target_name,
 	     l3_transaction_type[op_code],
 	     err_string, info_string);
+#endif 
 
 	/* clear the std error log*/
 	clear = std_err_main | CLEAR_STDERR_LOG;

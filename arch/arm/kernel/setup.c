@@ -254,6 +254,7 @@ static int __get_cpu_architecture(void)
 		/* Revised CPUID format. Read the Memory Model Feature
 		 * Register 0 and check for VMSAv7 or PMSAv7 */
 		unsigned int mmfr0 = read_cpuid_ext(CPUID_EXT_MMFR0);
+		pr_err("lwg:%s:%d:mmfr0 = %x\n", __func__, __LINE__, mmfr0);
 		if ((mmfr0 & 0x0000000f) >= 0x00000003 ||
 		    (mmfr0 & 0x000000f0) >= 0x00000030)
 			cpu_arch = CPU_ARCH_ARMv7;
@@ -529,7 +530,7 @@ void __init smp_setup_processor_id(void)
 	 * access percpu variable inside lock_release
 	 */
 	set_my_cpu_offset(0);
-
+	pr_info("XXX:mpidr = %x, cpuid = %x\n", read_cpuid_mpidr(), read_cpuid_id());
 	pr_info("Booting Linux on physical CPU 0x%x\n", mpidr);
 }
 
@@ -649,11 +650,11 @@ static void __init setup_processor(void)
 #ifdef CONFIG_MMU
 	init_default_cache_policy(list->__cpu_mm_mmu_flags);
 #endif
-	erratum_a15_798181_init();
+	erratum_a15_798181_init(); /* lwg: skippable */
 
-	elf_hwcap_fixup();
+	elf_hwcap_fixup(); /* lwg: skippable */
 
-	cacheid_init();
+	cacheid_init();   /* lwg: skippable */
 	cpu_init();
 }
 
@@ -775,6 +776,8 @@ static void __init request_standard_resources(const struct machine_desc *mdesc)
 	kernel_code.end     = virt_to_phys(_etext - 1);
 	kernel_data.start   = virt_to_phys(_sdata);
 	kernel_data.end     = virt_to_phys(_end - 1);
+
+	printk("lwg:%s:%d:kernel _text = %p, phys = %llx\n", __func__, __LINE__, _text, kernel_code.start);
 
 	for_each_memblock(memory, region) {
 		phys_addr_t start = __pfn_to_phys(memblock_region_memory_base_pfn(region));
@@ -1070,6 +1073,7 @@ void __init setup_arch(char **cmdline_p)
 #endif
 #endif
 
+	pr_err("lwg:%s:%d:cpuid_id = %08x\n", __func__, __LINE__, read_cpuid_id());
 	if (mdesc->init_early)
 		mdesc->init_early();
 }

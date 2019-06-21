@@ -740,12 +740,16 @@ void __init omap5_init_late(void)
 #ifdef CONFIG_SOC_DRA7XX
 void __init dra7xx_init_early(void)
 {
+#define probe() printk("lwg:%s:%d:ret = %d, prm_base = %p, kmalloc_caches[0] = %p\n", __func__, __LINE__, ret, prm_base, kmalloc_caches[0])
+	int ret = 0;
 	omap2_set_globals_tap(DRA7XX_CLASS,
 			      OMAP2_L4_IO_ADDRESS(DRA7XX_TAP_BASE));
 	omap2_set_globals_prcm_mpu(OMAP2_L4_IO_ADDRESS(OMAP54XX_PRCM_MPU_BASE));
-	omap2_control_base_init();
+	ret = omap2_control_base_init();
+	probe();
 	omap4_pm_init_early();
-	omap2_prcm_base_init();
+	ret = omap2_prcm_base_init();
+	probe();
 	dra7xxx_check_revision();
 	dra7xx_powerdomains_init();
 	dra7xx_clockdomains_init();

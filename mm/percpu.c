@@ -2222,8 +2222,10 @@ void __init setup_per_cpu_areas(void)
 		panic("Failed to initialize percpu areas.");
 
 	delta = (unsigned long)pcpu_base_addr - (unsigned long)__per_cpu_start;
-	for_each_possible_cpu(cpu)
+	for_each_possible_cpu(cpu) {
 		__per_cpu_offset[cpu] = delta + pcpu_unit_offsets[cpu];
+		pr_err("lwg:%s:%d:cpu [%d] offset = %lx\n", __func__, __LINE__, cpu, __per_cpu_offset[cpu]);
+	}
 }
 #endif	/* CONFIG_HAVE_SETUP_PER_CPU_AREA */
 

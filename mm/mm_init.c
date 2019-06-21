@@ -27,7 +27,7 @@ void __init mminit_verify_zonelist(void)
 	int nid;
 
 	if (mminit_loglevel < MMINIT_VERIFY)
-		return;
+		/*return;*/
 
 	for_each_online_node(nid) {
 		pg_data_t *pgdat = NODE_DATA(nid);
@@ -48,7 +48,7 @@ void __init mminit_verify_zonelist(void)
 				continue;
 
 			/* Print information about the zonelist */
-			printk(KERN_DEBUG "mminit::zonelist %s %d:%s = ",
+			printk("mminit::zonelist %s %d:%s = ",
 				listid > 0 ? "thisnode" : "general", nid,
 				zone->name);
 

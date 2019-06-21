@@ -713,6 +713,7 @@ static int __init_memblock memblock_remove_range(struct memblock_type *type,
 	int i, ret;
 
 	ret = memblock_isolate_range(type, base, size, &start_rgn, &end_rgn);
+	printk("lwg:%s:%d:ret = %d\n", __func__, __LINE__, ret);
 	if (ret)
 		return ret;
 

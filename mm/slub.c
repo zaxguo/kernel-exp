@@ -2523,7 +2523,10 @@ static __always_inline void *slab_alloc_node(struct kmem_cache *s,
 	struct kmem_cache_cpu *c;
 	struct page *page;
 	unsigned long tid;
-
+	if (!s) {
+		pr_err("lwg:%s:%d:interesting....passing a nil here\n", __func__, __LINE__);
+		dump_stack();
+	}
 	s = slab_pre_alloc_hook(s, gfpflags);
 	if (!s)
 		return NULL;
@@ -2564,6 +2567,7 @@ redo:
 	object = c->freelist;
 	page = c->page;
 	if (unlikely(!object || !node_match(page, node))) {
+		/*printk("lwg:%s:%d:object = %p, page = %p\n", __func__, __LINE__, object, page);*/
 		object = __slab_alloc(s, gfpflags, node, addr, c);
 		stat(s, ALLOC_SLOWPATH);
 	} else {
@@ -2623,6 +2627,9 @@ EXPORT_SYMBOL(kmem_cache_alloc);
 #ifdef CONFIG_TRACING
 void *kmem_cache_alloc_trace(struct kmem_cache *s, gfp_t gfpflags, size_t size)
 {
+	if (!s) {
+		pr_err("lwg:%s:%d:requesting nil slab from %p\n", __func__, __LINE__, _RET_IP_);
+	}
 	void *ret = slab_alloc(s, gfpflags, _RET_IP_);
 	trace_kmalloc(_RET_IP_, ret, size, s->size, gfpflags);
 	kasan_kmalloc(s, ret, size);
@@ -3577,6 +3584,13 @@ void *__kmalloc(size_t size, gfp_t flags)
 
 	kasan_kmalloc(s, ret, size);
 
+	if (!virt_addr_valid(ret)) {
+		printk("lwg:%s:%d:I am allocating invalid kernel address [%p]!!!\n", __func__, __LINE__, ret);
+		while(1);
+	}
+	/*printk("lwg;%s:%d:alloc @ %p\n", __func__, __LINE__, ret);*/
+	/*printk("lwg:%s:%d:pv_offset = %lx\n", __func__, __LINE__, PHYS_PFN_OFFSET);*/
+
 	return ret;
 }
 EXPORT_SYMBOL(__kmalloc);
@@ -3706,6 +3720,7 @@ void kfree(const void *x)
 
 	page = virt_to_head_page(x);
 	if (unlikely(!PageSlab(page))) {
+		printk("lwg:%s:%s:freeing a page not slab ... flag = %lx\n", __func__, __LINE__, page->flags);
 		BUG_ON(!PageCompound(page));
 		kfree_hook(x);
 		__free_kmem_pages(page, compound_order(page));

@@ -173,6 +173,24 @@ __do_user_fault(struct task_struct *tsk, unsigned long addr,
 	}
 #endif
 
+	printk("lwg:%s:%d:--- we are triggering a page fault....\n", __func__, __LINE__);
+	if (!strcmp(current->comm, "penzai.o")) { /* lwg: dump info... */
+		int should_skip = 0;
+		if (addr >= (unsigned long)0xf0000000) { /* Trying to access IO MEM */
+			should_skip =  1;
+		} else if (addr >= (unsigned long)0x40000000 && addr <= (unsigned long)0x50000000) {
+			should_skip = 1;
+		}
+		if (should_skip) {
+			pr_info("%s (%d): Trying to access: [%lx], pc=%lx\n",
+				current->comm, task_pid_nr(current), addr, regs->ARM_pc);
+			unsigned long *sp = (unsigned long *)((unsigned long)current_stack_pointer);
+			regs->ARM_pc += 4;
+			return;
+		}
+
+	}
+
 	tsk->thread.address = addr;
 	tsk->thread.error_code = fsr;
 	tsk->thread.trap_no = 14;
@@ -375,6 +393,19 @@ retry:
 		 */
 		sig = SIGBUS;
 		code = BUS_ADRERR;
+
+		{ /* lwg: dump info... */
+			dump_stack();
+			pr_info("%s (%d): SIGBUS: pc=%p, regs=%p\n",
+				current->comm, task_pid_nr(current), regs->ARM_pc, regs);
+			unsigned long *sp = (unsigned long *)((unsigned long)current_stack_pointer);
+			regs->ARM_pc += 4;
+			return 0;
+		}
+
+
+
+
 	} else {
 		/*
 		 * Something tried to access memory that
@@ -508,6 +539,7 @@ do_sect_fault(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 static int
 do_bad(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 {
+	printk("lwg:%s:%d:hit\n", __func__, __LINE__);
 	return 1;
 }
 
@@ -547,11 +579,24 @@ do_DataAbort(unsigned long addr, unsigned int fsr, struct pt_regs *regs)
 	const struct fsr_info *inf = fsr_info + fsr_fs(fsr);
 	struct siginfo info;
 
+	/*pr_alert("Unhandled fault: %s \n", current->comm);*/
 	if (!inf->fn(addr, fsr & ~FSR_LNX_PF, regs))
 		return;
 
-	pr_alert("Unhandled fault: %s (0x%03x) at 0x%08lx\n",
-		inf->name, fsr, addr);
+
+	if (!strcmp(current->comm, "penzai.o")) { /* lwg: dump info... */
+		pr_info("%s (%d): SIGBUS: pc=%p, regs=%p\n",
+			current->comm, task_pid_nr(current), regs->ARM_pc, regs);
+		unsigned long *sp = (unsigned long *)((unsigned long)current_stack_pointer);
+		regs->ARM_pc += 4;
+		return;
+	}
+
+
+
+
+	pr_alert("Unhandled fault (%s): %s (0x%03x) at 0x%08lx\n",
+		current->comm, inf->name, fsr, addr);
 	show_pte(current->mm, addr);
 
 	info.si_signo = inf->sig;

@@ -847,10 +847,14 @@ int __init omap2_control_base_init(void)
 
 	for_each_matching_node_and_match(np, omap_scrm_dt_match_table, &match) {
 		data = (struct control_init_data *)match->data;
-
+		
+		pr_err("XXXXXXXXX:lwg:%s:%d:kmalloc_caches[0] = %p\n", __func__, __LINE__, kmalloc_caches[0]);
 		omap2_ctrl_base = of_iomap(np, 0);
-		if (!omap2_ctrl_base)
+		pr_err("XXXXXXXXX:lwg:%s:%d:base = %p\n", __func__, __LINE__, omap2_ctrl_base);
+		if (!omap2_ctrl_base) {
+			pr_err("lwg:%s:%d:!!!! I'm not supposed to  be here\n", __func__, __LINE__);
 			return -ENOMEM;
+		}
 
 		omap2_ctrl_offset = data->offset;
 	}

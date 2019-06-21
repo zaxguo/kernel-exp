@@ -59,6 +59,9 @@ static u32 clk_memmap_readl(void __iomem *reg)
 	struct clk_omap_reg *r = (struct clk_omap_reg *)&reg;
 	struct clk_iomap *io = clk_memmaps[r->index];
 
+	void *tmp_addr = io->mem + r->offset;
+	/*printk("lwg:%s:%d:index = %x, offset = %x, reading %p [phys addr:%llx]\n", __func__, __LINE__, r->index, r->offset, tmp_addr, virt_to_phys(tmp_addr));*/
+
 	if (io->regmap)
 		regmap_read(io->regmap, r->offset, &val);
 	else
