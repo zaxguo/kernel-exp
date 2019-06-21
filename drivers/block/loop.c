@@ -404,6 +404,7 @@ static int lo_read_simple(struct loop_device *lo, struct request *rq,
 		}
 #endif
 
+
 		if (len < 0)
 			return len;
 
